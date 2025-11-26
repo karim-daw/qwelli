@@ -50,21 +50,21 @@ From the project root directory, run:
 **PowerShell:**
 
 ```powershell
-protoc --go_out=. --go_opt=module=qwelli --go-grpc_out=. --go-grpc_opt=module=qwelli api/proto/search.proto
+protoc --go_out=. --go_opt=module=github.com/karim-daw/qwelli --go-grpc_out=. --go-grpc_opt=module=github.com/karim-daw/qwelli api/proto/search.proto
 ```
 
 **Bash:**
 
 ```bash
-protoc --go_out=. --go_opt=module=qwelli --go-grpc_out=. --go-grpc_opt=module=qwelli api/proto/search.proto
+protoc --go_out=. --go_opt=module=github.com/karim-daw/qwelli --go-grpc_out=. --go-grpc_opt=module=github.com/karim-daw/qwelli api/proto/search.proto
 ```
 
 ### Command Breakdown
 
 - `--go_out=.` - Output directory for Go message types (current directory)
-- `--go_opt=module=qwelli` - Module name to use for import paths (matches `go.mod`)
+- `--go_opt=module=github.com/karim-daw/qwelli` - Module name to use for import paths (matches `go.mod`)
 - `--go-grpc_out=.` - Output directory for gRPC service code
-- `--go-grpc_opt=module=qwelli` - Module name for gRPC imports
+- `--go-grpc_opt=module=github.com/karim-daw/qwelli` - Module name for gRPC imports
 - `api/proto/search.proto` - Input proto file
 
 ### Generated Files
@@ -95,12 +95,12 @@ qwelli/
 The `go_package` option in the proto file determines the import path:
 
 ```proto
-option go_package = "qwelli/api/gen/go/qwelli/v1;v1;";
+option go_package = "github.com/karim-daw/qwelli/api/gen/go/qwelli/v1;v1;";
 ```
 
 This means:
 
-- Import path: `qwelli/api/gen/go/qwelli/v1`
+- Import path: `github.com/karim-daw/qwelli/api/gen/go/qwelli/v1`
 - Package name: `v1`
 - Generated files location: `api/gen/go/qwelli/v1/`
 
@@ -110,7 +110,7 @@ Import the generated code using:
 
 ```go
 import (
-    pb "qwelli/api/gen/go/qwelli/v1"
+    pb "github.com/karim-daw/qwelli/api/gen/go/qwelli/v1"
 )
 ```
 
@@ -150,22 +150,22 @@ The output directory structure is created automatically by protoc based on the `
 ### Generated files in wrong location
 
 - Ensure `go_package` option in proto file matches your module name (from `go.mod`)
-- Use `module=qwelli` option (not `paths=source_relative`) to respect `go_package` paths
+- Use `module=github.com/karim-daw/qwelli` option (not `paths=source_relative`) to respect `go_package` paths
 - Verify your `go.mod` module name matches the prefix in `go_package`
 
 ### Import errors in Go code
 
 - Ensure the import path matches your module name + the path from `go_package`
-- If module is `qwelli` and `go_package` is `qwelli/api/gen/go/qwelli/v1`, import as `qwelli/api/gen/go/qwelli/v1`
+- If module is `github.com/karim-daw/qwelli` and `go_package` is `github.com/karim-daw/qwelli/api/gen/go/qwelli/v1`, import as `github.com/karim-daw/qwelli/api/gen/go/qwelli/v1`
 - Run `go mod tidy` to ensure dependencies are correct
 
 ## Adding New Proto Files
 
 1. Create a new `.proto` file in `api/proto/`
-2. Set the `go_package` option to match the pattern: `qwelli/api/gen/go/qwelli/v1;v1;`
+2. Set the `go_package` option to match the pattern: `github.com/karim-daw/qwelli/api/gen/go/qwelli/v1;v1;`
 3. Run the protoc command, including the new file:
    ```bash
-   protoc --go_out=. --go_opt=module=qwelli --go-grpc_out=. --go-grpc_opt=module=qwelli api/proto/*.proto
+   protoc --go_out=. --go_opt=module=github.com/karim-daw/qwelli --go-grpc_out=. --go-grpc_opt=module=github.com/karim-daw/qwelli api/proto/*.proto
    ```
 
 ## References

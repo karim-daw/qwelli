@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	pb "qwelli/api/gen/go/qwelli/v1"
+	pb "github.com/karim-daw/qwelli/api/gen/go/qwelli/v1"
 )
 
 type searchService struct {

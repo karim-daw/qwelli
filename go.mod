@@ -1,4 +1,4 @@
-module qwelli
+module github.com/karim-daw/qwelli
 
 go 1.25.4
 

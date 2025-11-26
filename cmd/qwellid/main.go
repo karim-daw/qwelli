@@ -7,8 +7,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	pb "qwelli/api/gen/go/qwelli/v1"
-	"qwelli/internal/server"
+	pb "github.com/karim-daw/qwelli/api/gen/go/qwelli/v1"
+	"github.com/karim-daw/qwelli/internal/server"
 )
 
 func main() {

@@ -129,7 +129,7 @@ const file_api_proto_search_proto_rawDesc = "" +
 	"\x0eSearchResponse\x12\x18\n" +
 	"\aresults\x18\x01 \x03(\tR\aresults2P\n" +
 	"\rSearchService\x12?\n" +
-	"\x06Search\x12\x18.qwelli.v1.SearchRequest\x1a\x19.qwelli.v1.SearchResponse\"\x00B!Z\x1fqwelli/api/gen/go/qwelli/v1;v1;b\x06proto3"
+	"\x06Search\x12\x18.qwelli.v1.SearchRequest\x1a\x19.qwelli.v1.SearchResponse\"\x00B6Z4github.com/karim-daw/qwelli/api/gen/go/qwelli/v1;v1;b\x06proto3"
 
 var (
 	file_api_proto_search_proto_rawDescOnce sync.Once
