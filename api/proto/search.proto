@@ -10,8 +10,12 @@ service SearchService {
 
 message SearchRequest {
     string query = 1;
+    string folder_path = 2;
 }
 
 message SearchResponse {
     repeated string results = 1;
 }
+
+// generated command line commands
+// protoc --go_out=. --go_opt=module=qwelli --go-grpc_out=. --go-grpc_opt=module=qwelli api/proto/search.proto
