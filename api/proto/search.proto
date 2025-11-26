@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package qwelli.v1;
+
+option go_package = "qwelli/api/gen/go/qwelli/v1;v1;";
+
+service SearchService {
+    rpc Search(SearchRequest) returns (SearchResponse) {}
+}
+
+message SearchRequest {
+    string query = 1;
+}
+
+message SearchResponse {
+    repeated string results = 1;
+}
