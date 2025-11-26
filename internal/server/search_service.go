@@ -22,9 +22,10 @@ func (s *searchService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 
 	// user query to search for in files
 	searchQuery := req.GetQuery()
+	folderPath := req.GetFolderPath()
 
 	// search for matches of files given a folder path
-	files, err := os.ReadDir("tests/test_folder")
+	files, err := os.ReadDir(folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read folder: %v", err)
 	}
@@ -36,7 +37,7 @@ func (s *searchService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 		// check if string in query is in file name
 		fileLower := strings.ToLower(file.Name())
 		if strings.Contains(fileLower, searchQueryLower) {
-			results = append(results, filepath.Join("tests/test_folder", file.Name()))
+			results = append(results, filepath.Join(folderPath, file.Name()))
 		}
 	}
 
@@ -44,12 +45,12 @@ func (s *searchService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.
 	if len(results) == 0 {
 
 		for _, file := range files {
-			content, err := os.ReadFile(filepath.Join("tests/test_folder", file.Name()))
+			content, err := os.ReadFile(filepath.Join(folderPath, file.Name()))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read file: %v", err)
 			}
 			if strings.Contains(strings.ToLower(string(content)), searchQueryLower) {
-				results = append(results, filepath.Join("tests/test_folder", file.Name()))
+				results = append(results, filepath.Join(folderPath, file.Name()))
 			}
 		}
 	}
