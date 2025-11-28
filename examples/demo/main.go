@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
+	"github.com/karim-daw/qwelli/internal/indexer"
 )
 
 func main() {
@@ -39,6 +39,16 @@ func main() {
 
 	fmt.Println("✓ Database opened successfully")
 	fmt.Printf("  Vector dimension: %d\n", vectorDim)
+
+	// Initialize embedder
+	fmt.Println("\n🤖 Initializing embedder...")
+	modelDir := indexer.GetModelPath("")
+	embedder, err := indexer.NewEmbedder("KnightsAnalytics/all-MiniLM-L6-v2", modelDir, vectorDim)
+	if err != nil {
+		log.Fatalf("Failed to initialize embedder: %v", err)
+	}
+	defer embedder.Close()
+	fmt.Println("  ✓ Embedder initialized")
 
 	// Scan test folder and index files
 	fmt.Printf("\n📁 Scanning folder: %s\n", testFolder)
@@ -101,8 +111,12 @@ func main() {
 			continue
 		}
 
-		// Generate embedding from content (content-aware)
-		embedding := generateContentAwareEmbedding(string(content), vectorDim)
+		// Generate embedding from content
+		embedding, err := embedder.Embed(string(content))
+		if err != nil {
+			log.Printf("  ⚠️  Failed to generate embedding for %s: %v", docID, err)
+			continue
+		}
 
 		// Insert embedding
 		emb := db.Embedding{
@@ -131,26 +145,39 @@ func main() {
 	// Perform similarity searches
 	fmt.Println("\n🔎 Performing similarity searches...")
 
-	// Search 1: Query similar to "hello" or "name"
-	query1 := "hello my name"
-	fmt.Printf("\n  Search 1: \"%s\"\n", query1)
-	queryVector1 := generateContentAwareEmbedding(query1, vectorDim)
-	results1, err := projectDB.SearchANN(queryVector1, 2)
-	if err != nil {
-		log.Printf("  ⚠️  Search failed: %v", err)
-	} else {
-		printResults(results1, projectDB)
+	// Test queries covering different topics
+	testQueries := []struct {
+		name  string
+		query string
+		topK  int
+	}{
+		{"Greeting", "hello my name", 3},
+		{"Farewell", "bye farewell goodbye", 3},
+		{"Machine Learning", "neural networks and deep learning algorithms", 3},
+		{"Cooking", "chocolate chip cookie recipe ingredients", 3},
+		{"Travel", "Paris attractions and tourist destinations", 3},
+		{"Programming", "Python code functions and recursion", 3},
+		{"Database", "vector database architecture and HNSW indexing", 3},
+		{"Business", "team meeting notes and action items", 3},
+		{"API", "REST API endpoints and documentation", 3},
+		{"Literature", "poetry and poems about roads", 3},
 	}
 
-	// Search 2: Query similar to "bye" or "goodbye"
-	query2 := "bye goodbye"
-	fmt.Printf("\n  Search 2: \"%s\"\n", query2)
-	queryVector2 := generateContentAwareEmbedding(query2, vectorDim)
-	results2, err := projectDB.SearchANN(queryVector2, 2)
-	if err != nil {
-		log.Printf("  ⚠️  Search failed: %v", err)
-	} else {
-		printResults(results2, projectDB)
+	for i, test := range testQueries {
+		fmt.Printf("\n  Search %d: \"%s\" (%s)\n", i+1, test.query, test.name)
+		queryVector, err := embedder.Embed(test.query)
+		if err != nil {
+			log.Printf("  ⚠️  Failed to embed query: %v", err)
+			continue
+		}
+
+		results, err := projectDB.SearchANN(queryVector, test.topK)
+		if err != nil {
+			log.Printf("  ⚠️  Search failed: %v", err)
+			continue
+		}
+
+		printResults(results, projectDB)
 	}
 
 	// Show all indexed documents
@@ -199,47 +226,6 @@ func getFileType(path string) string {
 	}
 	// Remove the dot
 	return ext[1:]
-}
-
-// generateContentAwareEmbedding creates an embedding based on content
-// This is a simple simulation - in production you'd use a real embedding model
-func generateContentAwareEmbedding(content string, dim int) []float32 {
-	vector := make([]float32, dim)
-	contentLower := strings.ToLower(content)
-
-	// Simple content-aware hashing: use character frequencies and patterns
-	// This ensures similar content produces similar embeddings
-	hash := md5.Sum([]byte(contentLower))
-
-	// Distribute hash bytes across the vector dimensions
-	for i := 0; i < dim && i < len(hash); i++ {
-		vector[i] = float32(hash[i%len(hash)]) / 255.0
-	}
-
-	// Add some content-based features
-	// Count occurrences of common words to make similar content more similar
-	words := []string{"hello", "name", "karim", "bye", "goodbye"}
-	for i, word := range words {
-		if i < dim {
-			if strings.Contains(contentLower, word) {
-				vector[i] = 0.8 // Boost similarity for matching words
-			}
-		}
-	}
-
-	// Normalize to unit vector
-	magSq := float64(0)
-	for _, v := range vector {
-		magSq += float64(v) * float64(v)
-	}
-	if magSq > 0 {
-		mag := float32(math.Sqrt(magSq))
-		for i := range vector {
-			vector[i] /= mag
-		}
-	}
-
-	return vector
 }
 
 // printResults prints search results
