@@ -58,13 +58,13 @@ qwelli/
 │   │   ├── hybrid.go
 │   │   └── ranking.go
 │   │
-│   ├── db/                    # sqlite / data storage
-│   │   ├── sqlite.go
-│   │   └── migrations/
-│   │
-│   ├── models/                # internal struct models
-│   │   ├── document.go
-│   │   └── embedding.go
+│   ├── db/                    # duckdb / data storage
+│   │   ├── duckdb.go          # open/close DB, schema init
+│   │   ├── schema.go          # CREATE TABLE statements
+│   │   ├── models.go          # Document + Embedding structs
+│   │   ├── embeddings.go      # insert/load embeddings
+│   │   ├── search.go          # HNSW index creation + ANN search
+│   │   └── util.go            # small helper functions
 │   │
 │   ├── config/                # config loading + CLI flags
 │   │   └── config.go
@@ -105,8 +105,8 @@ The gRPC layer is just an adapter. The core search engine is pure Go, making it:
 ### 3. Scalability
 
 This structure works for both MVP and production:
-- **MVP**: Basic FTS5, single background worker, minimal proto files
-- **Production**: Multiple indexes, desktop client, update hooks, ONNX embeddings, hot-reloading watchers
+- **MVP**: Basic full-text search, single background worker, minimal proto files
+- **Production**: Multiple indexes, desktop client, update hooks, ONNX embeddings, hot-reloading watchers, HNSW vector indexes
 
 ## Component Details
 
@@ -152,9 +152,18 @@ Core search algorithms:
 ### internal/db/
 
 Database layer:
-- SQLite with FTS5 for full-text search
-- Optional vector extension for vector storage
-- Migration system for schema management
+- **duckdb.go**: Database connection management, initialization, and lifecycle
+- **schema.go**: Table definitions and schema creation (documents, embeddings, metadata)
+- **models.go**: Go struct definitions for Document and Embedding types
+- **embeddings.go**: Embedding insertion, batch loading, and retrieval operations
+- **search.go**: HNSW index creation and approximate nearest neighbor (ANN) search
+- **util.go**: Helper functions for database operations
+
+DuckDB provides:
+- Native vector data types and operations
+- Built-in HNSW index support for efficient ANN search
+- Full-text search capabilities
+- High-performance analytical queries
 
 ### pkg/client/
 
@@ -176,11 +185,14 @@ Optional public SDK providing:
 ### Phase 2: Database & Indexing
 
 **Database & Storage**
-- [ ] SQLite connection setup
-- [ ] Database schema design (documents, embeddings, metadata)
-- [ ] Migration system
-- [ ] FTS5 integration for text search
-- [ ] Vector storage solution (SQLite extension or separate index)
+- [ ] DuckDB connection setup (duckdb.go)
+- [ ] Database schema design and creation (schema.go)
+- [ ] Document and Embedding model definitions (models.go)
+- [ ] Full-text search integration using DuckDB
+- [ ] Vector storage with DuckDB native vector types
+- [ ] HNSW index creation for embeddings (search.go)
+- [ ] Embedding insertion and batch loading (embeddings.go)
+- [ ] Database utility functions (util.go)
 
 **Indexing System**
 - [ ] File system scanner (recursive directory traversal)
@@ -194,8 +206,9 @@ Optional public SDK providing:
 
 **Search Algorithms**
 - [ ] BM25 implementation for text search
-- [ ] SQLite FTS5 text search integration
-- [ ] Vector similarity search (cosine similarity)
+- [ ] DuckDB full-text search integration
+- [ ] HNSW-based approximate nearest neighbor (ANN) search (search.go)
+- [ ] Vector similarity search using DuckDB vector operations
 - [ ] Hybrid search algorithm (combining BM25 and vector scores)
 - [ ] Result ranking and re-ranking
 - [ ] Search result pagination
@@ -241,8 +254,8 @@ Optional public SDK providing:
 
 - **Language**: Go 1.21+
 - **API**: gRPC with Protocol Buffers
-- **Database**: SQLite with FTS5
-- **Vector Search**: SQLite vector extension or custom implementation
+- **Database**: DuckDB with native vector support
+- **Vector Search**: DuckDB HNSW indexes for approximate nearest neighbor search
 - **Embeddings**: Local ONNX model (or similar)
 - **Code Generation**: protoc or Buf
 
