@@ -34,3 +34,4 @@ models/KnightsAnalytics_all-MiniLM-L6-v2/special_tokens_map.json
 models/KnightsAnalytics_all-MiniLM-L6-v2/tokenizer_config.json
 models/KnightsAnalytics_all-MiniLM-L6-v2/tokenizer.json
 models/KnightsAnalytics_all-MiniLM-L6-v2/vocab.txt
+demo.db
