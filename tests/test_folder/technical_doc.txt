@@ -1,0 +1,21 @@
+Vector Database Architecture
+
+A vector database is designed to store and query high-dimensional vectors efficiently.
+These vectors typically represent embeddings from machine learning models.
+
+Key Components:
+1. Vector Storage: Efficient storage of float arrays
+2. Indexing: HNSW (Hierarchical Navigable Small World) graphs for fast similarity search
+3. Query Interface: Approximate nearest neighbor (ANN) search capabilities
+
+Use Cases:
+- Semantic search
+- Recommendation systems
+- Image similarity search
+- Document retrieval
+
+Performance Metrics:
+- Query latency: < 10ms for 1M vectors
+- Index build time: ~5 minutes for 1M vectors
+- Memory usage: ~4GB for 1M 384-dim vectors
+
