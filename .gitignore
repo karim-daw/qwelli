@@ -28,3 +28,9 @@ go.work
 .DS_Store
 Thumbs.db
 qwellid
+models/KnightsAnalytics_all-MiniLM-L6-v2/config.json
+models/KnightsAnalytics_all-MiniLM-L6-v2/model.onnx
+models/KnightsAnalytics_all-MiniLM-L6-v2/special_tokens_map.json
+models/KnightsAnalytics_all-MiniLM-L6-v2/tokenizer_config.json
+models/KnightsAnalytics_all-MiniLM-L6-v2/tokenizer.json
+models/KnightsAnalytics_all-MiniLM-L6-v2/vocab.txt
