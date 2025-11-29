@@ -43,13 +43,12 @@ func OpenProjectDB(path string, vectorDim int) (*ProjectDB, error) {
 
 	// Enable experimental persistence for HNSW indexes on file-based databases
 	// This allows the index to be persisted to disk
-	if path != ":memory:" {
-		if _, err := conn.Exec("SET hnsw_enable_experimental_persistence = true"); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("failed to enable HNSW persistence: %w", err)
-		}
+	if _, err := conn.Exec("SET hnsw_enable_experimental_persistence = true"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to enable HNSW persistence: %w", err)
 	}
 
+	// loop through all statements and execute them
 	for _, stmt := range buildSchema(vectorDim) {
 		if _, err := conn.Exec(stmt); err != nil {
 			conn.Close()
