@@ -27,6 +27,7 @@ func buildSchema(vectorDim int) []string {
 	}
 }
 
+// will replace first "?" with new in s
 func replace(s, old, new string) string {
 	return strings.Replace(s, old, new, 1)
 }

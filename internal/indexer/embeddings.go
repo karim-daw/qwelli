@@ -27,8 +27,6 @@ func NewEmbedder(modelName string, modelDir string, expectedDim int) (*Embedder,
 		return nil, fmt.Errorf("failed to create model directory: %w", err)
 	}
 
-	// Check if model is already downloaded
-	// hugot.DownloadModel structures models as: modelDir/modelName/model.onnx
 	expectedModelPath := filepath.Join(modelDir, modelName)
 	expectedOnnxFile := filepath.Join(expectedModelPath, "model.onnx")
 
