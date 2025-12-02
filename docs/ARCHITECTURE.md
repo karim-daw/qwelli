@@ -146,7 +146,8 @@ type SearchService struct {
 Core indexing functionality:
 - **scanner.go**: Filesystem crawling
 - **extractor.go**: Text extraction from various file types
-- **embeddings.go**: Embedding generation using local models
+- **embeddings.go**: Simple wrapper around Ollama manager for embedding generation
+- **ollama.go**: Ollama server lifecycle management and embedding client
 - **watcher.go**: File system watching for real-time updates
 
 ### internal/search/
@@ -286,11 +287,11 @@ The database layer is fully functional and tested:
 - [ ] Search result pagination
 
 **Embeddings & Models**
-- [ ] Local embedding model integration (ONNX or similar)
-- [ ] Embedding generation pipeline
-- [ ] Model loading and caching
-- [ ] Batch embedding processing
-- [ ] Embedding storage and retrieval
+- [x] Local embedding model integration (Ollama)
+- [x] Embedding generation pipeline (via Ollama client)
+- [x] Model loading and caching (handled by Ollama)
+- [x] Batch embedding processing
+- [x] Embedding storage and retrieval
 
 ### Phase 4: Advanced Features
 
@@ -324,11 +325,11 @@ The database layer is fully functional and tested:
 
 ## Technology Stack
 
-- **Language**: Go 1.21+
+- **Language**: Go 1.25+
 - **API**: gRPC with Protocol Buffers
 - **Database**: DuckDB with native vector support
 - **Vector Search**: DuckDB HNSW indexes for approximate nearest neighbor search
-- **Embeddings**: Local ONNX model (or similar)
+- **Embeddings**: Ollama (nomic-embed-text model by default)
 - **Code Generation**: protoc or Buf
 
 ## Future Considerations
