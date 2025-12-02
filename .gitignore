@@ -30,3 +30,6 @@ Thumbs.db
 qwellid
 demo.db
 *.db
+
+# Environment variables
+.env
