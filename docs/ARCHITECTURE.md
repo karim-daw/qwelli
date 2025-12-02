@@ -49,7 +49,11 @@ qwelli/
 │   ├── indexer/               # core indexing logic
 │   │   ├── scanner.go
 │   │   ├── extractor.go
-│   │   ├── embeddings.go
+│   │   ├── embeddings.go      # Embedder wrapper
+│   │   ├── embedder.go        # Provider interface and factory
+│   │   ├── 
+_provider.go # OpenAI embeddings
+│   │   ├── cohere_provider.go # Cohere embeddings
 │   │   └── watcher.go
 │   │
 │   ├── search/                # core search logic
@@ -146,8 +150,10 @@ type SearchService struct {
 Core indexing functionality:
 - **scanner.go**: Filesystem crawling
 - **extractor.go**: Text extraction from various file types
-- **embeddings.go**: Simple wrapper around Ollama manager for embedding generation
-- **ollama.go**: Ollama server lifecycle management and embedding client
+- **embeddings.go**: Simple wrapper around embedding provider
+- **embedder.go**: Provider interface definition and factory
+- **openai_provider.go**: OpenAI embeddings API client
+- **cohere_provider.go**: Cohere embeddings API client
 - **watcher.go**: File system watching for real-time updates
 
 ### internal/search/
@@ -287,10 +293,10 @@ The database layer is fully functional and tested:
 - [ ] Search result pagination
 
 **Embeddings & Models**
-- [x] Local embedding model integration (Ollama)
-- [x] Embedding generation pipeline (via Ollama client)
-- [x] Model loading and caching (handled by Ollama)
-- [x] Batch embedding processing
+- [x] Cloud embedding API integration (OpenAI, Cohere)
+- [x] Embedding generation pipeline (via API providers)
+- [x] Provider interface for swappable backends
+- [x] Batch embedding processing with true parallelization
 - [x] Embedding storage and retrieval
 
 ### Phase 4: Advanced Features
@@ -329,7 +335,7 @@ The database layer is fully functional and tested:
 - **API**: gRPC with Protocol Buffers
 - **Database**: DuckDB with native vector support
 - **Vector Search**: DuckDB HNSW indexes for approximate nearest neighbor search
-- **Embeddings**: Ollama (nomic-embed-text model by default)
+- **Embeddings**: OpenAI and Cohere APIs (text-embedding-3-small default)
 - **Code Generation**: protoc or Buf
 
 ## Future Considerations

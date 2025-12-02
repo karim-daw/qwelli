@@ -4,7 +4,54 @@ Get started with Qwelli embeddings in under 5 minutes!
 
 ## Prerequisites
 
-**None!** Qwelli automatically installs Ollama if it's not present on your system.
+- Go 1.25 or later
+- API key from OpenAI or Cohere
+
+## Setup
+
+### 1. Get an API Key
+
+**OpenAI (Recommended):**
+1. Go to [platform.openai.com](https://platform.openai.com)
+2. Create an account or sign in
+3. Navigate to API Keys section
+4. Create a new API key
+
+**Cohere:**
+1. Go to [cohere.ai](https://cohere.ai)
+2. Create an account or sign in
+3. Navigate to API Keys
+4. Copy your API key
+
+### 2. Configure Environment Variables
+
+**Option A: Using .env file (Recommended)**
+
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your API key:
+   ```bash
+   QWELLI_EMBEDDING_PROVIDER=openai
+   OPENAI_API_KEY=sk-your-api-key-here
+   ```
+
+**Option B: Export directly in shell**
+
+```bash
+export OPENAI_API_KEY=sk-...
+# or
+export COHERE_API_KEY=...
+```
+
+### 3. Install Dependencies
+
+```bash
+cd your-project
+go get github.com/karim-daw/qwelli
+```
 
 ## Basic Usage
 
@@ -13,20 +60,20 @@ package main
 
 import (
     "log"
+    "github.com/joho/godotenv"
     "github.com/karim-daw/qwelli/internal/indexer"
 )
 
 func main() {
-    // Create embedder - this will:
-    // 1. Detect your OS
-    // 2. Install Ollama if needed
-    // 3. Start the server
-    // 4. Download the model if needed
-    embedder, err := indexer.NewEmbedder("nomic-embed-text", "", 0)
+    // Load .env file (if it exists)
+    _ = godotenv.Load()
+    
+    // Create embedder (uses OpenAI by default, reads from env vars)
+    embedder, err := indexer.NewEmbedder("text-embedding-3-small", "", 0)
     if err != nil {
         log.Fatal(err)
     }
-    defer embedder.Close() // Important: stops the server
+    defer embedder.Close()
     
     // Generate an embedding
     embedding, err := embedder.Embed("Hello, world!")
@@ -39,52 +86,30 @@ func main() {
 }
 ```
 
-## First Run Output
+## Using .env File
 
-When you run your application for the first time, you'll see:
+The simplest way to run your application is with a `.env` file:
 
-```
-🖥️  System: WSL (Windows Subsystem for Linux) (linux/arm64)
-⚠️  Ollama is not installed
-🔧 Attempting automatic installation...
-📥 Downloading Ollama installation script...
-🚀 Running Ollama installer...
-✅ Ollama installed successfully!
-✅ Ollama is installed
-🚀 Starting Ollama server...
-✅ Ollama server started (PID: 12345)
-⏳ Waiting for Ollama server to be ready...
-✅ Ollama server is ready
-🔍 Checking for model 'nomic-embed-text'...
-📥 Model 'nomic-embed-text' not found, downloading...
-   📊 pulling manifest
-   📊 pulling 970aa74c0a90... 100%
-✅ Model 'nomic-embed-text' downloaded successfully
-🔢 Detecting embedding dimension...
-✅ Ollama manager initialized
-   Model: nomic-embed-text
-   Dimension: 768
-   Host: http://localhost:11434
+**1. Create `.env`:**
+```bash
+QWELLI_EMBEDDING_PROVIDER=openai
+OPENAI_API_KEY=sk-your-key-here
 ```
 
-## Subsequent Runs
-
-After the first run, startup is much faster:
-
+**2. Run your application:**
+```bash
+go run main.go
 ```
-🖥️  System: WSL (Windows Subsystem for Linux) (linux/arm64)
-✅ Ollama is installed
-🚀 Starting Ollama server...
-✅ Ollama server started (PID: 67890)
-⏳ Waiting for Ollama server to be ready...
-✅ Ollama server is ready
-🔍 Checking for model 'nomic-embed-text'...
-✅ Model 'nomic-embed-text' is already available
-🔢 Detecting embedding dimension...
-✅ Ollama manager initialized
-   Model: nomic-embed-text
-   Dimension: 768
-   Host: http://localhost:11434
+
+The `.env` file is automatically loaded by `godotenv.Load()` in your main function.
+
+**Switching Providers:**
+
+Just edit your `.env` file:
+```bash
+# Switch to Cohere
+QWELLI_EMBEDDING_PROVIDER=cohere
+COHERE_API_KEY=your-cohere-key
 ```
 
 ## Common Tasks
@@ -122,57 +147,43 @@ dim := embedder.Dimension()
 log.Printf("This model produces %d-dimensional embeddings", dim)
 ```
 
-### Use a Different Model
+### Switch Providers
 
 ```go
-// Use a larger model for better quality
-embedder, err := indexer.NewEmbedder("mxbai-embed-large", "", 0)
+// OpenAI
+cfg := indexer.Config{
+    Provider: "openai",
+    Model:    "text-embedding-3-small",
+    APIKey:   os.Getenv("OPENAI_API_KEY"),
+}
 
-// Or a smaller model for speed
-embedder, err := indexer.NewEmbedder("all-minilm", "", 0)
+// Cohere
+cfg := indexer.Config{
+    Provider: "cohere",
+    Model:    "embed-english-v3.0",
+    APIKey:   os.Getenv("COHERE_API_KEY"),
+}
+
+embedder, err := indexer.NewEmbedderWithProvider(cfg)
 ```
-
-## Installation Locations
-
-### Ollama Binary
-
-- **Linux/WSL**: `/usr/local/bin/ollama`
-- **macOS**: `/opt/homebrew/bin/ollama` (Homebrew) or `/Applications/Ollama.app`
-- **Windows**: `C:\Program Files\Ollama\ollama.exe`
-
-### Models
-
-- **Linux/WSL**: `~/.ollama/models`
-- **macOS**: `~/.ollama/models`
-- **Windows**: `C:\Users\%username%\.ollama\models`
 
 ## Available Models
 
-| Model | Dimension | Size | Best For |
-|-------|-----------|------|----------|
-| `nomic-embed-text` | 768 | ~274 MB | General-purpose (default) |
-| `mxbai-embed-large` | 1024 | ~670 MB | Higher quality, slower |
-| `all-minilm` | 384 | ~120 MB | Faster, lower quality |
+### OpenAI
 
-## Configuration
+| Model | Dimension | Cost per 1M tokens | Best For |
+|-------|-----------|-------------------|----------|
+| `text-embedding-3-small` | 1536 | $0.02 | General-purpose (recommended) |
+| `text-embedding-3-large` | 3072 | $0.13 | Higher quality |
+| `text-embedding-ada-002` | 1536 | $0.10 | Legacy model |
 
-### Custom Model Storage
+### Cohere
 
-```bash
-# Set before running your app
-export OLLAMA_MODELS=/path/to/models
-```
-
-### Use External Ollama Server
-
-```go
-// Don't manage the server yourself
-manager, err := indexer.NewOllamaManager(
-    "http://remote-server:11434",
-    "nomic-embed-text",
-    false, // Don't start/stop server
-)
-```
+| Model | Dimension | Languages | Best For |
+|-------|-----------|-----------|----------|
+| `embed-english-v3.0` | 1024 | English | General-purpose |
+| `embed-multilingual-v3.0` | 1024 | 100+ | Multi-lingual |
+| `embed-english-light-v3.0` | 384 | English | Faster processing |
 
 ## Examples
 
@@ -187,63 +198,77 @@ See `examples/demo/main.go` for a complete end-to-end example that:
 Run it:
 ```bash
 cd examples/demo
+cp ../../.env.example .env
+# Edit .env and add your OPENAI_API_KEY
 go run main.go
 ```
 
-### Embedding Test
+## Configuration
 
-See `tests/test_embedding.go` for a simple embedding test:
+### Environment Variables
+
 ```bash
-go run tests/test_embedding.go
+# Provider (default: openai)
+export QWELLI_EMBEDDING_PROVIDER=openai
+
+# API Keys (required)
+export OPENAI_API_KEY=sk-...
+export COHERE_API_KEY=...
+
+# Model override (optional)
+export QWELLI_EMBEDDING_MODEL=text-embedding-3-large
+```
+
+### Programmatic Configuration
+
+```go
+cfg := indexer.Config{
+    Provider:  "openai",
+    Model:     "text-embedding-3-small",
+    APIKey:    os.Getenv("OPENAI_API_KEY"),
+    Endpoint:  "", // optional custom endpoint
+    Dimension: 0,  // auto-detected
+}
+
+embedder, err := indexer.NewEmbedderWithProvider(cfg)
 ```
 
 ## Troubleshooting
 
-### Installation Fails
+### "API key required" error
 
-If automatic installation fails, install manually:
-
-**Linux/WSL:**
+Make sure you've set the appropriate environment variable:
 ```bash
-curl -fsSL https://ollama.ai/install.sh | sh
+export OPENAI_API_KEY=sk-your-key-here
+# or
+export COHERE_API_KEY=your-key-here
 ```
 
-**macOS:**
-```bash
-brew install ollama
-```
+### "Provider not found" error
 
-**Windows:**
-Download from [ollama.ai/download](https://ollama.ai/download)
+Make sure `QWELLI_EMBEDDING_PROVIDER` is either `openai` or `cohere`.
 
-### Server Won't Start
+### Rate limiting
 
-Check if Ollama is already running:
-```bash
-ps aux | grep ollama
-```
+Both OpenAI and Cohere have rate limits. If you hit them:
+- Use batch processing (`EmbedBatch()`) to reduce API calls
+- Add exponential backoff retry logic
+- Check your account tier limits
 
-Kill existing process if needed:
-```bash
-pkill ollama
-```
+### Slow performance
 
-### Model Download Stuck
-
-Check your internet connection and try pulling manually:
-```bash
-ollama pull nomic-embed-text
-```
+- Check your internet connection
+- Use `EmbedBatch()` for multiple texts (much faster than individual calls)
+- Both providers typically respond in 100-200ms
 
 ## Next Steps
 
-- Read [EMBEDDINGS.md](./EMBEDDINGS.md) for detailed documentation
-- Read [AUTO_INSTALL.md](./AUTO_INSTALL.md) for installation details
+- Read [EMBEDDING_PROVIDERS.md](./EMBEDDING_PROVIDERS.md) for detailed provider comparison
 - Read [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture
 - Check out the [demo application](../examples/demo/main.go)
 
 ## Learn More
 
-- [Ollama Documentation](https://github.com/ollama/ollama)
-- [Nomic Embed Text Model](https://ollama.ai/library/nomic-embed-text)
+- [OpenAI Embeddings API](https://platform.openai.com/docs/guides/embeddings)
+- [Cohere Embed API](https://docs.cohere.com/reference/embed)
 - [DuckDB VSS Extension](https://duckdb.org/docs/extensions/vss)
