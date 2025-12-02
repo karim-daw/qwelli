@@ -12,16 +12,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/indexer"
 )
 
 func main() {
+	// Load .env file if it exists (ignore error if not found)
+	_ = godotenv.Load()
+
+	totalStart := time.Now()
+
 	// Configuration
 	// Try multiple possible paths for test folder
 	testFolder := findTestFolder()
 	dbPath := "demo.db"
-	vectorDim := 384
+	embeddingModel := "text-embedding-3-small" // OpenAI embedding model
 
 	// Clean up existing database
 	if _, err := os.Stat(dbPath); err == nil {
@@ -29,8 +35,22 @@ func main() {
 		os.Remove(dbPath)
 	}
 
+	// Initialize embedder first to get dimension
+	fmt.Println("🤖 Initializing embedder...")
+	embedderStart := time.Now()
+	embedder, err := indexer.NewEmbedder(embeddingModel, "", 0)
+	if err != nil {
+		log.Fatalf("Failed to initialize embedder: %v", err)
+	}
+	defer embedder.Close()
+
+	vectorDim := embedder.Dimension()
+	fmt.Printf("  ✓ Embedder initialized (model: %s, dimension: %d)\n", embeddingModel, vectorDim)
+	fmt.Printf("  ⏱️  Embedder initialization: %v\n", time.Since(embedderStart))
+
 	// Open the database
-	fmt.Println("📂 Opening database...")
+	fmt.Println("\n📂 Opening database...")
+	dbStart := time.Now()
 	projectDB, err := db.OpenProjectDB(dbPath, vectorDim)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -39,19 +59,11 @@ func main() {
 
 	fmt.Println("✓ Database opened successfully")
 	fmt.Printf("  Vector dimension: %d\n", vectorDim)
-
-	// Initialize embedder
-	fmt.Println("\n🤖 Initializing embedder...")
-	modelDir := indexer.GetModelPath("")
-	embedder, err := indexer.NewEmbedder("KnightsAnalytics/all-MiniLM-L6-v2", modelDir, vectorDim)
-	if err != nil {
-		log.Fatalf("Failed to initialize embedder: %v", err)
-	}
-	defer embedder.Close()
-	fmt.Println("  ✓ Embedder initialized")
+	fmt.Printf("  ⏱️  Database initialization: %v\n", time.Since(dbStart))
 
 	// Scan test folder and index files
 	fmt.Printf("\n📁 Scanning folder: %s\n", testFolder)
+	scanStart := time.Now()
 	files, err := scanFolder(testFolder)
 	if err != nil {
 		log.Fatalf("Failed to scan folder: %v", err)
@@ -62,10 +74,17 @@ func main() {
 	}
 
 	fmt.Printf("  Found %d file(s)\n", len(files))
+	fmt.Printf("  ⏱️  Folder scan: %v\n", time.Since(scanStart))
 
 	// Process and index files
 	fmt.Println("\n📄 Indexing files...")
-	docCount := 0
+	indexStart := time.Now()
+
+	// First, prepare all documents
+	var docs []db.Document
+	var fileContents []string
+	var fileNames []string
+
 	for _, file := range files {
 		// Read file content
 		content, err := os.ReadFile(file.Path)
@@ -105,45 +124,60 @@ func main() {
 			Content:    string(content),
 		}
 
-		// Insert document
+		docs = append(docs, doc)
+		fileContents = append(fileContents, string(content))
+		fileNames = append(fileNames, filepath.Base(file.Path))
+	}
+
+	// Insert all documents
+	fmt.Printf("  Inserting %d documents...\n", len(docs))
+	for _, doc := range docs {
 		if err := projectDB.InsertDocument(doc); err != nil {
-			log.Printf("  ⚠️  Failed to insert document %s: %v", docID, err)
-			continue
+			log.Printf("  ⚠️  Failed to insert document %s: %v", doc.ID, err)
 		}
+	}
 
-		// Generate embedding from content
-		embedding, err := embedder.Embed(string(content))
-		if err != nil {
-			log.Printf("  ⚠️  Failed to generate embedding for %s: %v", docID, err)
-			continue
-		}
+	// Generate all embeddings in batch
+	fmt.Printf("  Generating embeddings for %d documents...\n", len(fileContents))
+	embeddings, err := embedder.EmbedBatch(fileContents)
+	if err != nil {
+		log.Fatalf("  ⚠️  Failed to generate batch embeddings: %v", err)
+	}
 
-		// Insert embedding
+	// Insert all embeddings
+	fmt.Printf("  Inserting %d embeddings...\n", len(embeddings))
+	for i, embedding := range embeddings {
 		emb := db.Embedding{
-			DocID:  docID,
+			DocID:  docs[i].ID,
 			Vector: embedding,
 		}
 
 		if err := projectDB.InsertEmbedding(emb); err != nil {
-			log.Printf("  ⚠️  Failed to insert embedding for %s: %v", docID, err)
+			log.Printf("  ⚠️  Failed to insert embedding for %s: %v", docs[i].ID, err)
 			continue
 		}
 
-		fmt.Printf("  ✓ Indexed: %s (%d bytes)\n", filepath.Base(file.Path), info.Size())
-		docCount++
+		fmt.Printf("  ✓ Indexed: %s (%d bytes)\n", fileNames[i], docs[i].Size)
 	}
 
+	docCount := len(docs)
+
 	fmt.Printf("\n✓ Successfully indexed %d document(s)\n", docCount)
+	fmt.Printf("  ⏱️  Indexing took: %v (avg: %v per document)\n",
+		time.Since(indexStart), time.Since(indexStart)/time.Duration(docCount))
 
 	// Build HNSW index for fast similarity search
 	fmt.Println("\n🔍 Building HNSW index...")
+	hnswStart := time.Now()
 	if err := projectDB.BuildHNSWIndex(); err != nil {
 		log.Fatalf("Failed to build index: %v", err)
 	}
 	fmt.Println("  ✓ Index built successfully")
+	fmt.Printf("  ⏱️  HNSW index build: %v\n", time.Since(hnswStart))
 
 	// Perform similarity searches
 	fmt.Println("\n🔎 Performing similarity searches...")
+	searchStart := time.Now()
 
 	// Test queries covering different topics
 	testQueries := []struct {
@@ -164,6 +198,7 @@ func main() {
 	}
 
 	for i, test := range testQueries {
+		queryStart := time.Now()
 		fmt.Printf("\n  Search %d: \"%s\" (%s)\n", i+1, test.query, test.name)
 		queryVector, err := embedder.Embed(test.query)
 		if err != nil {
@@ -178,7 +213,11 @@ func main() {
 		}
 
 		printResults(results, projectDB)
+		fmt.Printf("    ⏱️  Query time: %v\n", time.Since(queryStart))
 	}
+
+	fmt.Printf("\n  ⏱️  Total search time: %v (avg: %v per query)\n",
+		time.Since(searchStart), time.Since(searchStart)/time.Duration(len(testQueries)))
 
 	// Show all indexed documents
 	fmt.Println("\n📊 Summary:")
@@ -191,6 +230,13 @@ func main() {
 
 	fmt.Println("\n✅ End-to-end demo completed successfully!")
 	fmt.Printf("   Database saved to: %s\n", dbPath)
+	fmt.Printf("\n⏱️  TOTAL TIME: %v\n", time.Since(totalStart))
+	fmt.Println("\n📊 Performance Breakdown:")
+	fmt.Printf("   • Embedder initialization: included in total\n")
+	fmt.Printf("   • Database setup: included in total\n")
+	fmt.Printf("   • File indexing: included in total\n")
+	fmt.Printf("   • HNSW index build: included in total\n")
+	fmt.Printf("   • Searches (10 queries): included in total\n")
 }
 
 // scanFolder recursively scans a folder and returns all files
