@@ -1,0 +1,35 @@
+Weekly Grocery Shopping List
+
+Produce:
+- Bananas
+- Apples
+- Spinach
+- Tomatoes
+- Carrots
+- Broccoli
+
+Dairy:
+- Milk
+- Eggs
+- Cheese
+- Yogurt
+- Butter
+
+Meat & Seafood:
+- Chicken breast
+- Salmon fillets
+- Ground beef
+
+Pantry Items:
+- Pasta
+- Rice
+- Olive oil
+- Salt and pepper
+- Coffee
+- Bread
+
+Other:
+- Toilet paper
+- Laundry detergent
+- Shampoo
+

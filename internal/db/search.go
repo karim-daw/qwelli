@@ -1,13 +1,10 @@
 package db
 
 func (p *ProjectDB) BuildHNSWIndex() error {
-	_, err := p.conn.Exec(`
-        CREATE INDEX IF NOT EXISTS hnsw_idx
-        ON embeddings
-		USING HNSW (vector)
-        WITH (metric='cosine');
-    `)
-	return err
+	// HNSW indexes are created per model automatically since each model has different dimensions
+	// We don't create a global index since FLOAT[] doesn't support HNSW
+	// Searches will use WHERE model_id = ? which is indexed by the primary key
+	return nil
 }
 
 type SearchResult struct {
@@ -15,15 +12,16 @@ type SearchResult struct {
 	Distance float64
 }
 
-func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
+func (p *ProjectDB) SearchANN(query []float32, k int, modelID int) ([]SearchResult, error) {
 	rows, err := p.conn.Query(`
-        SELECT doc_id, vector <-> ? AS distance
+        SELECT doc_id, vector <-> $1 AS distance
         FROM embeddings
-        ORDER BY vector <-> ?
-        LIMIT ?
+        WHERE model_id = $2
+        ORDER BY vector <-> $1
+        LIMIT $3
     `,
-		query, // Pass float32 directly - DuckDB expects float32 for FLOAT arrays
-		query, // Used again in ORDER BY
+		query,   // Pass float32 directly - DuckDB expects float32 for FLOAT arrays
+		modelID, // Only search embeddings for this model
 		k,
 	)
 	if err != nil {

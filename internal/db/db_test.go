@@ -11,7 +11,7 @@ func TestOpenProjectDB(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
 
-		pdb, err := OpenProjectDB(dbPath)
+		pdb, err := OpenProjectDB(dbPath, 4)
 		if err != nil {
 			t.Fatalf("OpenProjectDB() error = %v, want nil", err)
 		}
@@ -27,7 +27,7 @@ func TestOpenProjectDB(t *testing.T) {
 	})
 
 	t.Run("empty_path_error", func(t *testing.T) {
-		_, err := OpenProjectDB("")
+		_, err := OpenProjectDB("", 4)
 		if err == nil {
 			t.Fatal("OpenProjectDB(\"\") expected error, got nil")
 		}
@@ -38,7 +38,7 @@ func TestInsertAndGetDocument(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
@@ -97,7 +97,7 @@ func TestInsertEmbedding(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
@@ -118,10 +118,17 @@ func TestInsertEmbedding(t *testing.T) {
 		t.Fatalf("InsertDocument() error = %v", err)
 	}
 
+	// Create a model first
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
+
 	// Create test embedding (4 dimensions for simplicity)
 	testEmbedding := Embedding{
-		DocID:  testDoc.ID,
-		Vector: []float32{0.1, 0.2, 0.3, 0.4},
+		DocID:   testDoc.ID,
+		ModelID: modelID,
+		Vector:  []float32{0.1, 0.2, 0.3, 0.4},
 	}
 
 	t.Run("insert_embedding", func(t *testing.T) {
@@ -162,7 +169,7 @@ func TestInsertEmbedding_Replace(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
@@ -183,10 +190,17 @@ func TestInsertEmbedding_Replace(t *testing.T) {
 		t.Fatalf("InsertDocument() error = %v", err)
 	}
 
+	// Create a model
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
+
 	// Insert first embedding
 	emb1 := Embedding{
-		DocID:  testDoc.ID,
-		Vector: []float32{0.1, 0.2, 0.3, 0.4},
+		DocID:   testDoc.ID,
+		ModelID: modelID,
+		Vector:  []float32{0.1, 0.2, 0.3, 0.4},
 	}
 	if err := pdb.InsertEmbedding(emb1); err != nil {
 		t.Fatalf("InsertEmbedding() first insert error = %v", err)
@@ -194,8 +208,9 @@ func TestInsertEmbedding_Replace(t *testing.T) {
 
 	// Replace with new embedding
 	emb2 := Embedding{
-		DocID:  testDoc.ID,
-		Vector: []float32{0.5, 0.6, 0.7, 0.8},
+		DocID:   testDoc.ID,
+		ModelID: modelID,
+		Vector:  []float32{0.5, 0.6, 0.7, 0.8},
 	}
 	if err := pdb.InsertEmbedding(emb2); err != nil {
 		t.Fatalf("InsertEmbedding() replace error = %v", err)
@@ -223,11 +238,17 @@ func TestMultipleDocumentsAndEmbeddings(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
 	defer pdb.Close()
+
+	// Create a model
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
 
 	// Insert multiple documents
 	docs := []Document{
@@ -237,9 +258,9 @@ func TestMultipleDocumentsAndEmbeddings(t *testing.T) {
 	}
 
 	embeddings := []Embedding{
-		{DocID: "doc-1", Vector: []float32{1.0, 0.0, 0.0, 0.0}},
-		{DocID: "doc-2", Vector: []float32{0.0, 1.0, 0.0, 0.0}},
-		{DocID: "doc-3", Vector: []float32{0.0, 0.0, 1.0, 0.0}},
+		{DocID: "doc-1", ModelID: modelID, Vector: []float32{1.0, 0.0, 0.0, 0.0}},
+		{DocID: "doc-2", ModelID: modelID, Vector: []float32{0.0, 1.0, 0.0, 0.0}},
+		{DocID: "doc-3", ModelID: modelID, Vector: []float32{0.0, 0.0, 1.0, 0.0}},
 	}
 
 	// Insert all
@@ -270,11 +291,17 @@ func TestBuildHNSWIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
 	defer pdb.Close()
+
+	// Create a model
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
 
 	// Insert documents with embeddings
 	docs := []Document{
@@ -283,8 +310,8 @@ func TestBuildHNSWIndex(t *testing.T) {
 	}
 
 	embeddings := []Embedding{
-		{DocID: "hnsw-doc-1", Vector: []float32{1.0, 0.0, 0.0, 0.0}},
-		{DocID: "hnsw-doc-2", Vector: []float32{0.0, 1.0, 0.0, 0.0}},
+		{DocID: "hnsw-doc-1", ModelID: modelID, Vector: []float32{1.0, 0.0, 0.0, 0.0}},
+		{DocID: "hnsw-doc-2", ModelID: modelID, Vector: []float32{0.0, 1.0, 0.0, 0.0}},
 	}
 
 	for _, doc := range docs {
@@ -319,11 +346,17 @@ func TestSearchANN(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
 	defer pdb.Close()
+
+	// Create a model
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
 
 	// Insert documents with distinct embeddings for easy verification
 	// Using orthogonal vectors for predictable search results
@@ -334,9 +367,9 @@ func TestSearchANN(t *testing.T) {
 	}
 
 	embeddings := []Embedding{
-		{DocID: "search-doc-1", Vector: []float32{1.0, 0.0, 0.0, 0.0}},  // Points along x-axis
-		{DocID: "search-doc-2", Vector: []float32{0.0, 1.0, 0.0, 0.0}},  // Points along y-axis
-		{DocID: "search-doc-3", Vector: []float32{0.0, 0.0, 1.0, 0.0}},  // Points along z-axis
+		{DocID: "search-doc-1", ModelID: modelID, Vector: []float32{1.0, 0.0, 0.0, 0.0}}, // Points along x-axis
+		{DocID: "search-doc-2", ModelID: modelID, Vector: []float32{0.0, 1.0, 0.0, 0.0}}, // Points along y-axis
+		{DocID: "search-doc-3", ModelID: modelID, Vector: []float32{0.0, 0.0, 1.0, 0.0}}, // Points along z-axis
 	}
 
 	for _, doc := range docs {
@@ -360,7 +393,7 @@ func TestSearchANN(t *testing.T) {
 		// Search with a vector close to doc-1
 		queryVector := []float32{0.9, 0.1, 0.0, 0.0}
 
-		results, err := pdb.SearchANN(queryVector, 3)
+		results, err := pdb.SearchANN(queryVector, 3, modelID)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -378,7 +411,7 @@ func TestSearchANN(t *testing.T) {
 	t.Run("search_limit_k", func(t *testing.T) {
 		queryVector := []float32{0.5, 0.5, 0.5, 0.0}
 
-		results, err := pdb.SearchANN(queryVector, 1)
+		results, err := pdb.SearchANN(queryVector, 1, modelID)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -392,7 +425,7 @@ func TestSearchANN(t *testing.T) {
 		// Query exactly matching doc-2
 		queryVector := []float32{0.0, 1.0, 0.0, 0.0}
 
-		results, err := pdb.SearchANN(queryVector, 3)
+		results, err := pdb.SearchANN(queryVector, 3, modelID)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -412,7 +445,7 @@ func TestSearchANN(t *testing.T) {
 		// Request 0 results
 		queryVector := []float32{1.0, 0.0, 0.0, 0.0}
 
-		results, err := pdb.SearchANN(queryVector, 0)
+		results, err := pdb.SearchANN(queryVector, 0, modelID)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -427,11 +460,17 @@ func TestSearchANN_EmptyDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	pdb, err := OpenProjectDB(dbPath)
+	pdb, err := OpenProjectDB(dbPath, 4)
 	if err != nil {
 		t.Fatalf("OpenProjectDB() error = %v", err)
 	}
 	defer pdb.Close()
+
+	// Create a model
+	modelID, err := pdb.GetOrCreateModel("test-model", 4)
+	if err != nil {
+		t.Fatalf("GetOrCreateModel() error = %v", err)
+	}
 
 	// Build index on empty table (should not error)
 	if err := pdb.BuildHNSWIndex(); err != nil {
@@ -440,7 +479,7 @@ func TestSearchANN_EmptyDatabase(t *testing.T) {
 
 	// Search on empty database
 	queryVector := []float32{1.0, 0.0, 0.0, 0.0}
-	results, err := pdb.SearchANN(queryVector, 3)
+	results, err := pdb.SearchANN(queryVector, 3, modelID)
 	if err != nil {
 		t.Fatalf("SearchANN() on empty database error = %v", err)
 	}

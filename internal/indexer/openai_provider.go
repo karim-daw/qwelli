@@ -72,22 +72,103 @@ func (p *OpenAIProvider) Embed(text string) ([]float32, error) {
 	return embeddings[0], nil
 }
 
-// EmbedBatch generates embeddings for multiple texts (true batching)
+// EmbedBatch generates embeddings for multiple texts with smart batching
+// to optimize API calls while respecting token limits (8192 tokens for text-embedding-3-small).
 func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float32, error) {
 	start := time.Now()
 
-	embeddings, err := p.callAPI(texts)
-	if err != nil {
-		return nil, err
+	if len(texts) == 0 {
+		return [][]float32{}, nil
 	}
 
-	if len(embeddings) != len(texts) {
-		return nil, fmt.Errorf("expected %d embeddings, got %d", len(texts), len(embeddings))
+	// Create batches that respect token limits
+	batches := p.createBatches(texts)
+	log.Printf("  Split %d documents into %d batch(es)", len(texts), len(batches))
+
+	allEmbeddings := make([][]float32, 0, len(texts))
+	totalAPICalls := 0
+
+	for batchIdx, batch := range batches {
+		log.Printf("  Processing batch %d/%d (%d documents, ~%d tokens)...",
+			batchIdx+1, len(batches), len(batch.texts), batch.estimatedTokens)
+
+		embeddings, err := p.callAPI(batch.texts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process batch %d: %w", batchIdx+1, err)
+		}
+
+		if len(embeddings) != len(batch.texts) {
+			return nil, fmt.Errorf("batch %d: expected %d embeddings, got %d",
+				batchIdx+1, len(batch.texts), len(embeddings))
+		}
+
+		allEmbeddings = append(allEmbeddings, embeddings...)
+		totalAPICalls++
 	}
 
-	log.Printf("⏱️  Generated %d embeddings in batch: %v (avg: %v per embedding)",
-		len(texts), time.Since(start), time.Since(start)/time.Duration(len(texts)))
-	return embeddings, nil
+	log.Printf("⏱️  Generated %d embeddings in %d API call(s): %v (avg: %v per embedding)",
+		len(texts), totalAPICalls, time.Since(start), time.Since(start)/time.Duration(len(texts)))
+	return allEmbeddings, nil
+}
+
+// batch represents a group of texts to embed together
+type batch struct {
+	texts           []string
+	estimatedTokens int
+}
+
+// createBatches groups texts into batches that respect token limits
+func (p *OpenAIProvider) createBatches(texts []string) []batch {
+	const maxTokensPerBatch = 8000 // Conservative limit (actual is 8192)
+
+	batches := []batch{}
+	currentBatch := batch{
+		texts:           []string{},
+		estimatedTokens: 0,
+	}
+
+	for _, text := range texts {
+		estimatedTokens := estimateTokens(text)
+
+		// If this single text exceeds the limit, it goes in its own batch
+		if estimatedTokens > maxTokensPerBatch {
+			// Flush current batch if not empty
+			if len(currentBatch.texts) > 0 {
+				batches = append(batches, currentBatch)
+				currentBatch = batch{texts: []string{}, estimatedTokens: 0}
+			}
+			// Add large text as its own batch
+			batches = append(batches, batch{
+				texts:           []string{text},
+				estimatedTokens: estimatedTokens,
+			})
+			continue
+		}
+
+		// If adding this text would exceed the limit, start a new batch
+		if currentBatch.estimatedTokens+estimatedTokens > maxTokensPerBatch && len(currentBatch.texts) > 0 {
+			batches = append(batches, currentBatch)
+			currentBatch = batch{texts: []string{}, estimatedTokens: 0}
+		}
+
+		// Add text to current batch
+		currentBatch.texts = append(currentBatch.texts, text)
+		currentBatch.estimatedTokens += estimatedTokens
+	}
+
+	// Don't forget the last batch
+	if len(currentBatch.texts) > 0 {
+		batches = append(batches, currentBatch)
+	}
+
+	return batches
+}
+
+// estimateTokens provides a rough estimate of tokens for a text
+// Rule of thumb: ~4 characters per token for English text
+func estimateTokens(text string) int {
+	// Conservative estimate: 3 chars per token (safer than 4)
+	return (len(text) + 2) / 3
 }
 
 // callAPI makes the API call to OpenAI

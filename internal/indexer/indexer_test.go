@@ -6,9 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
 func TestNewOpenAIProvider_Validation(t *testing.T) {
+	_ = godotenv.Load()
+
 	tests := []struct {
 		name     string
 		apiKey   string
@@ -269,13 +273,11 @@ func TestOpenAIProvider_WrongEmbeddingCount(t *testing.T) {
 
 // Tests using real OpenAI API (skipped if env vars not set)
 func TestOpenAIProvider_RealAPI(t *testing.T) {
+	_ = godotenv.Load("../../.env")
+
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
 	model := os.Getenv("QWELLI_EMBEDDING_MODEL")
-	endpoint := os.Getenv("OPENAI_ENDPOINT")
-
-	if apiKey == "" || model == "" || endpoint == "" {
-		t.Skip("Skipping real API test: QWELLI_EMBEDDING_KEY, QWELLI_EMBEDDING_MODEL, or OPENAI_ENDPOINT not set")
-	}
+	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT")
 
 	provider, err := NewOpenAIProvider(apiKey, model, endpoint)
 	if err != nil {
@@ -322,13 +324,11 @@ func TestOpenAIProvider_RealAPI(t *testing.T) {
 }
 
 func TestEmbedder_RealAPI(t *testing.T) {
+	_ = godotenv.Load("../../.env")
+
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
 	model := os.Getenv("QWELLI_EMBEDDING_MODEL")
-	endpoint := os.Getenv("OPENAI_ENDPOINT")
-
-	if apiKey == "" || model == "" || endpoint == "" {
-		t.Skip("Skipping real API test: QWELLI_EMBEDDING_KEY, QWELLI_EMBEDDING_MODEL, or OPENAI_ENDPOINT not set")
-	}
+	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT")
 
 	embedder, err := NewEmbedder(apiKey, model, endpoint)
 	if err != nil {

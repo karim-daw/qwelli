@@ -5,38 +5,53 @@ import (
 )
 
 func (p *ProjectDB) InsertDocument(document Document) error {
+	// Convert metadata to string for JSON column
+	var metadataStr string
+	if document.Metadata != nil {
+		switch v := document.Metadata.(type) {
+		case string:
+			metadataStr = v
+		case []byte:
+			metadataStr = string(v)
+		default:
+			metadataStr = "{}"
+		}
+	} else {
+		metadataStr = "{}"
+	}
+
 	_, err := p.conn.Exec(`
-		INSERT INTO documents (doc_id, path, file_type, modified_at, size, metadata, content)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT OR REPLACE INTO documents (doc_id, path, file_type, modified_at, size, metadata, content)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`,
 		document.ID,
 		document.Path,
 		document.FileType,
-		document.ModifiedAt,
+		document.ModifiedAt.Format("2006-01-02 15:04:05"),
 		document.Size,
-		document.Metadata,
+		metadataStr,
 		document.Content,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert document: %w", err)
+		return fmt.Errorf("failed to insert document (id=%s, path=%s): %w", document.ID, document.Path, err)
 	}
-	fmt.Println("Document inserted successfully")
-	return err
+	return nil
 }
 
 func (p *ProjectDB) InsertEmbedding(embed Embedding) error {
 	_, err := p.conn.Exec(`
-        INSERT OR REPLACE INTO embeddings (doc_id, vector)
-        VALUES (?, ?)
+        INSERT OR REPLACE INTO embeddings (doc_id, model_id, vector)
+        VALUES ($1, $2, $3)
     `,
 		embed.DocID,
+		embed.ModelID,
 		embed.Vector, // Pass float32 directly - DuckDB expects float32 for FLOAT arrays
 	)
 	return err
 }
 
 func (p *ProjectDB) LoadAllEmbeddings() ([]Embedding, error) {
-	rows, err := p.conn.Query(`SELECT doc_id, vector FROM embeddings`)
+	rows, err := p.conn.Query(`SELECT doc_id, model_id, vector FROM embeddings`)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +60,10 @@ func (p *ProjectDB) LoadAllEmbeddings() ([]Embedding, error) {
 	result := []Embedding{}
 	for rows.Next() {
 		var id string
+		var modelID int
 		var vecInterface interface{}
 
-		if err := rows.Scan(&id, &vecInterface); err != nil {
+		if err := rows.Scan(&id, &modelID, &vecInterface); err != nil {
 			return nil, err
 		}
 
@@ -74,8 +90,9 @@ func (p *ProjectDB) LoadAllEmbeddings() ([]Embedding, error) {
 		}
 
 		result = append(result, Embedding{
-			DocID:  id,
-			Vector: vec,
+			DocID:   id,
+			ModelID: modelID,
+			Vector:  vec,
 		})
 	}
 

@@ -1,0 +1,13 @@
+[2024-10-15 10:23:45] ERROR: Failed to connect to database
+[2024-10-15 10:23:46] WARNING: Retrying connection attempt 1/3
+[2024-10-15 10:23:47] ERROR: Connection timeout after 5 seconds
+[2024-10-15 10:23:48] WARNING: Retrying connection attempt 2/3
+[2024-10-15 10:23:50] INFO: Successfully connected to database
+[2024-10-15 10:24:12] ERROR: Query failed: invalid SQL syntax
+[2024-10-15 10:24:13] INFO: Query retried and succeeded
+[2024-10-15 10:25:00] WARNING: High memory usage detected: 85%
+[2024-10-15 10:25:30] INFO: Memory usage normalized to 65%
+[2024-10-15 10:26:00] ERROR: Embedding generation failed for document ID: doc_12345
+[2024-10-15 10:26:01] WARNING: Skipping document doc_12345
+[2024-10-15 10:27:00] INFO: Indexing completed successfully
+

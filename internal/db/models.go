@@ -13,6 +13,14 @@ type Document struct {
 }
 
 type Embedding struct {
-	DocID  string
-	Vector []float32
+	DocID   string
+	ModelID int
+	Vector  []float32
+}
+
+type Model struct {
+	ID        int
+	Name      string
+	Dimension int
+	CreatedAt time.Time
 }
