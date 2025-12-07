@@ -18,7 +18,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize embedder: %v", err)
 	}
-	defer embedder.Close()
 
 	fmt.Printf("✓ Embedder initialized (dimension: %d)\n\n", embedder.Dimension())
 

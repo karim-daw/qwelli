@@ -9,12 +9,11 @@ import (
 )
 
 type ProjectDB struct {
-	Path      string
-	VectorDim int
-	conn      *sql.DB
+	Path string
+	conn *sql.DB
 }
 
-func OpenProjectDB(path string, vectorDim int) (*ProjectDB, error) {
+func OpenProjectDB(path string) (*ProjectDB, error) {
 
 	if path == "" {
 		return nil, errors.New("path for project database is required")
@@ -26,9 +25,8 @@ func OpenProjectDB(path string, vectorDim int) (*ProjectDB, error) {
 	}
 
 	pdb := &ProjectDB{
-		Path:      path,
-		VectorDim: vectorDim,
-		conn:      conn,
+		Path: path,
+		conn: conn,
 	}
 
 	// Load the VSS extension for vector similarity search
@@ -49,7 +47,7 @@ func OpenProjectDB(path string, vectorDim int) (*ProjectDB, error) {
 	}
 
 	// loop through all statements and execute them
-	for _, stmt := range buildSchema(vectorDim) {
+	for _, stmt := range buildSchema() {
 		if _, err := conn.Exec(stmt); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("failed to create schema: %w", err)

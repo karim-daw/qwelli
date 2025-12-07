@@ -14,7 +14,7 @@ import (
 func main() {
 	// Test 1: In-memory database
 	fmt.Println("Test 1: In-memory database")
-	database, err := db.OpenProjectDB("", 1536)
+	database, err := db.OpenProjectDB("")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -24,7 +24,7 @@ func main() {
 	// Test 2: File-based database with directory creation
 	fmt.Println("\nTest 2: File-based database (with directory creation)")
 	testDBPath := "testdata/test.db"
-	database2, err := db.OpenProjectDB(testDBPath, 1536)
+	database2, err := db.OpenProjectDB(testDBPath)
 	if err != nil {
 		log.Fatalf("Failed to open file database: %v", err)
 	}

@@ -7,22 +7,15 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"time"
-)
-
-const (
-	defaultOpenAIEndpoint = "https://api.openai.com/v1/embeddings"
-	defaultOpenAIModel    = "text-embedding-3-small"
 )
 
 // OpenAIProvider implements EmbeddingProvider for OpenAI API
 type OpenAIProvider struct {
-	apiKey    string
-	model     string
-	endpoint  string
-	dimension int
-	client    *http.Client
+	apiKey   string
+	model    string
+	endpoint string
+	client   *http.Client
 }
 
 // OpenAI API request/response structures
@@ -38,23 +31,15 @@ type openAIResponse struct {
 }
 
 // NewOpenAIProvider creates a new OpenAI embedding provider
-func NewOpenAIProvider(cfg Config) (*OpenAIProvider, error) {
-	apiKey := cfg.APIKey
+func NewOpenAIProvider(apiKey, model, endpoint string) (*OpenAIProvider, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+		return nil, fmt.Errorf("OpenAI API key required")
 	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key required (set OPENAI_API_KEY env var or pass in config)")
-	}
-
-	model := cfg.Model
 	if model == "" {
-		model = defaultOpenAIModel
+		return nil, fmt.Errorf("OpenAI model required")
 	}
-
-	endpoint := cfg.Endpoint
 	if endpoint == "" {
-		endpoint = defaultOpenAIEndpoint
+		return nil, fmt.Errorf("OpenAI endpoint required")
 	}
 
 	p := &OpenAIProvider{
@@ -66,18 +51,7 @@ func NewOpenAIProvider(cfg Config) (*OpenAIProvider, error) {
 		},
 	}
 
-	// Auto-detect dimension if not provided
-	if cfg.Dimension > 0 {
-		p.dimension = cfg.Dimension
-	} else {
-		dim, err := p.detectDimension()
-		if err != nil {
-			return nil, fmt.Errorf("failed to detect dimension: %w", err)
-		}
-		p.dimension = dim
-	}
-
-	log.Printf("✅ OpenAI provider initialized (model: %s, dimension: %d)", model, p.dimension)
+	log.Printf("✅ OpenAI provider initialized (model: %s)", model)
 	return p, nil
 }
 
@@ -114,16 +88,6 @@ func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float32, error) {
 	log.Printf("⏱️  Generated %d embeddings in batch: %v (avg: %v per embedding)",
 		len(texts), time.Since(start), time.Since(start)/time.Duration(len(texts)))
 	return embeddings, nil
-}
-
-// Dimension returns the embedding dimension
-func (p *OpenAIProvider) Dimension() int {
-	return p.dimension
-}
-
-// Close cleans up resources (no-op for OpenAI)
-func (p *OpenAIProvider) Close() error {
-	return nil
 }
 
 // callAPI makes the API call to OpenAI
@@ -173,14 +137,4 @@ func (p *OpenAIProvider) callAPI(input any) ([][]float32, error) {
 	}
 
 	return embeddings, nil
-}
-
-// detectDimension detects the embedding dimension by making a test call
-func (p *OpenAIProvider) detectDimension() (int, error) {
-	log.Println("🔢 Detecting embedding dimension...")
-	embeddings, err := p.callAPI("test")
-	if err != nil {
-		return 0, err
-	}
-	return len(embeddings[0]), nil
 }

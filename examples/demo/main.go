@@ -24,10 +24,11 @@ func main() {
 	totalStart := time.Now()
 
 	// Configuration
-	// Try multiple possible paths for test folder
-	testFolder := findTestFolder()
+	testFolder := "../tests/test_folder"
 	dbPath := "demo.db"
-	embeddingModel := "text-embedding-3-small" // OpenAI embedding model
+	modelName := os.Getenv("QWELLI_EMBEDDING_MODEL")
+	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
+	endpoint := os.Getenv("OPENAI_ENDPOINT")
 
 	// Clean up existing database
 	if _, err := os.Stat(dbPath); err == nil {
@@ -38,27 +39,24 @@ func main() {
 	// Initialize embedder first to get dimension
 	fmt.Println("🤖 Initializing embedder...")
 	embedderStart := time.Now()
-	embedder, err := indexer.NewEmbedder(embeddingModel, "", 0)
+
+	embedder, err := indexer.NewEmbedder(apiKey, modelName, endpoint)
 	if err != nil {
 		log.Fatalf("Failed to initialize embedder: %v", err)
 	}
-	defer embedder.Close()
-
-	vectorDim := embedder.Dimension()
-	fmt.Printf("  ✓ Embedder initialized (model: %s, dimension: %d)\n", embeddingModel, vectorDim)
+	fmt.Printf("  ✓ Embedder initialized (model: %s)\n", modelName)
 	fmt.Printf("  ⏱️  Embedder initialization: %v\n", time.Since(embedderStart))
 
 	// Open the database
 	fmt.Println("\n📂 Opening database...")
 	dbStart := time.Now()
-	projectDB, err := db.OpenProjectDB(dbPath, vectorDim)
+	projectDB, err := db.OpenProjectDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer projectDB.Close()
 
 	fmt.Println("✓ Database opened successfully")
-	fmt.Printf("  Vector dimension: %d\n", vectorDim)
 	fmt.Printf("  ⏱️  Database initialization: %v\n", time.Since(dbStart))
 
 	// Scan test folder and index files

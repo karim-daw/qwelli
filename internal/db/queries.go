@@ -25,10 +25,6 @@ func (p *ProjectDB) InsertDocument(document Document) error {
 }
 
 func (p *ProjectDB) InsertEmbedding(embed Embedding) error {
-	if len(embed.Vector) != p.VectorDim {
-		return fmt.Errorf("expected vector dim %d, got %d", p.VectorDim, len(embed.Vector))
-	}
-
 	_, err := p.conn.Exec(`
         INSERT OR REPLACE INTO embeddings (doc_id, vector)
         VALUES (?, ?)

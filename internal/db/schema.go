@@ -1,11 +1,6 @@
 package db
 
-import (
-	"fmt"
-	"strings"
-)
-
-func buildSchema(vectorDim int) []string {
+func buildSchema() []string {
 	return []string{
 		`
         CREATE TABLE IF NOT EXISTS documents (
@@ -18,16 +13,11 @@ func buildSchema(vectorDim int) []string {
             content TEXT
         );
         `,
-		replace(`
+		`
         CREATE TABLE IF NOT EXISTS embeddings (
             doc_id TEXT PRIMARY KEY REFERENCES documents(doc_id),
-            vector FLOAT[?]
+            vector FLOAT[]
         );
-        `, "?", fmt.Sprintf("%d", vectorDim)),
+        `,
 	}
-}
-
-// will replace first "?" with new in s
-func replace(s, old, new string) string {
-	return strings.Replace(s, old, new, 1)
 }
