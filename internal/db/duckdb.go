@@ -60,7 +60,7 @@ func OpenProjectDB(path string, dimension int) (*ProjectDB, error) {
 	}
 
 	// loop through all statements and execute them
-	for _, stmt := range buildSchema(dimension) {
+	for _, stmt := range buildSchema() {
 		if _, err := conn.Exec(stmt); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("failed to create schema: %w", err)
