@@ -1,6 +1,6 @@
 package db
 
-func buildSchema(dimension int) []string {
+func buildSchema() []string {
 	return []string{
 		`
         CREATE TABLE IF NOT EXISTS documents (
