@@ -15,28 +15,8 @@ jobs:
         include:
           - os: ubuntu-latest
             goos: linux
-            goarch: amd64
-            output: qwelli-linux-amd64
-          - os: ubuntu-latest
-            goos: linux
             goarch: arm64
             output: qwelli-linux-arm64
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            output: qwelli-macos-amd64
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            output: qwelli-macos-arm64
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            output: qwelli-windows-amd64.exe
-          - os: windows-latest
-            goos: windows
-            goarch: arm64
-            output: qwelli-windows-arm64.exe
 
     steps:
       - name: Checkout code
