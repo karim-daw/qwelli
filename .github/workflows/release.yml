@@ -13,10 +13,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            output: qwelli-linux-arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            output: qwelli-windows-amd64.exe
 
     steps:
       - name: Checkout code
