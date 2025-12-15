@@ -1,9 +1,19 @@
 package db
 
+import "fmt"
+
 func (p *ProjectDB) BuildHNSWIndex() error {
-	// HNSW indexes are created per model automatically since each model has different dimensions
-	// We don't create a global index since FLOAT[] doesn't support HNSW
-	// Searches will use WHERE model_id = ? which is indexed by the primary key
+	// Create HNSW index on the vector column for fast similarity search
+	// The index will work with the WHERE model_id = ? filter in searches
+	// Using cosine distance metric for semantic similarity
+	_, err := p.conn.Exec(`
+		CREATE INDEX IF NOT EXISTS hnsw_embeddings_index 
+		ON embeddings USING HNSW (vector) 
+		WITH (metric = 'cosine', ef_construction = 200, M = 16)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create HNSW index: %w", err)
+	}
 	return nil
 }
 
