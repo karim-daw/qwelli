@@ -21,6 +21,17 @@ func NewShellCmd() *cobra.Command {
 }
 
 func runShell(cmd *cobra.Command, args []string) error {
+	// Check if stdin is available
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to check stdin: %w", err)
+	}
+
+	// Ensure we're running in an interactive terminal
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		return fmt.Errorf("shell command requires an interactive terminal\nPlease run this command directly in your terminal, not through a pipe or redirect")
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 
 	cfg, err := config.Load()
@@ -43,7 +54,11 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			return err
+			if err.Error() == "EOF" {
+				fmt.Println("\n👋 Goodbye!")
+				return nil
+			}
+			return fmt.Errorf("error reading input: %w", err)
 		}
 
 		input = strings.TrimSpace(input)
