@@ -276,7 +276,7 @@ func runListShell(_ *cobra.Command, _ []string) error {
 
 // useIndexByNumber sets the current index based on the number from the list
 func useIndexByNumber(num int) error {
-	if cachedIndexList == nil || len(cachedIndexList) == 0 {
+	if len(cachedIndexList) == 0 {
 		return fmt.Errorf("no cached index list. Run 'list' first")
 	}
 
