@@ -23,7 +23,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("🚀 Welcome to Qwelli!")
-	fmt.Println("Let's set up your configuration.\n")
+	fmt.Println("Let's set up your configuration.")
 
 	// Start with defaults
 	cfg := config.DefaultConfig()

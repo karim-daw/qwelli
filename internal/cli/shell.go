@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/karim-daw/qwelli/internal/config"
+	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/spf13/cobra"
 )
 
 var currentIndex string
+var cachedIndexList []string
 
 func NewShellCmd() *cobra.Command {
 	return &cobra.Command{
@@ -37,13 +41,13 @@ func runShell(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("⚠️  Warning: %v\n", err)
-		fmt.Println("Run 'init' to set up configuration first\n")
+		fmt.Println("Run 'init' to set up configuration first")
 	} else {
 		fmt.Printf("📊 Current model: %s\n\n", cfg.Model)
 	}
 
 	fmt.Println("🔍 Qwelli Interactive Shell")
-	fmt.Println("Type 'help' for commands, 'exit' to quit\n")
+	fmt.Println("Type 'help' for commands, 'exit' to quit")
 
 	for {
 		prompt := "qwelli"
@@ -99,7 +103,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		case "search":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: search <query>")
+				fmt.Println("❌ Usage: search <query> [--top N]")
 				continue
 			}
 
@@ -115,21 +119,36 @@ func runShell(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			query := strings.Join(cmdArgs, " ")
-			if err := runSearch(query, indexPath, 5); err != nil {
+			// Parse query and flags
+			query, topN := parseSearchArgs(cmdArgs)
+			if err := runSearch(query, indexPath, topN); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
 		case "use":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: use <folder>")
+				fmt.Println("❌ Usage: use <folder|number>")
+				fmt.Println("   Use 'list' to see numbered options")
 				continue
 			}
-			currentIndex = cmdArgs[0]
-			fmt.Printf("✅ Using index: %s\n", currentIndex)
+
+			// Check if argument is a number
+			if num, err := strconv.Atoi(cmdArgs[0]); err == nil {
+				// Numeric selection - get from cached list
+				if err := useIndexByNumber(num); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+					fmt.Println("   Run 'list' to see available indexes")
+				} else {
+					fmt.Printf("✅ Using index: %s\n", currentIndex)
+				}
+			} else {
+				// Path-based selection
+				currentIndex = cmdArgs[0]
+				fmt.Printf("✅ Using index: %s\n", currentIndex)
+			}
 
 		case "list":
-			if err := runList(cmd, cmdArgs); err != nil {
+			if err := runListShell(cmd, cmdArgs); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
@@ -174,15 +193,121 @@ func runShell(cmd *cobra.Command, args []string) error {
 func printShellHelp() {
 	fmt.Println(`Available commands:
 
-  init              - Initialize configuration
-  index <folder>    - Index a folder (sets as current)
-  use <folder>      - Set current index folder
-  search <query>    - Search current index
-  list              - List all indexed folders
-  status [folder]   - Show index status
-  model [name]      - Show or change embedding model
+  init                  - Initialize configuration
+  index <folder>        - Index a folder (sets as current)
+  use <folder|#>        - Set current index folder (use number from list)
+  search <query> [opts] - Search current index
+    --top N, -t N       - Number of results (default: 5)
+  list                  - List all indexed folders (with numbers)
+  status [folder]       - Show index status
+  model [name]          - Show or change embedding model
 
-  clear             - Clear screen
-  help              - Show this help
-  exit              - Exit shell`)
+  clear                 - Clear screen
+  help                  - Show this help
+  exit                  - Exit shell
+
+Examples:
+  list                  - Show all indexes with numbers
+  use 1                 - Use the first index from the list
+  use ./my-folder       - Use a specific folder path
+  search hello          - Search for "hello" (top 5 results)
+  search hello --top 3  - Search for "hello" (top 3 results)`)
+}
+
+// runListShell lists all indexed folders and caches them for numeric selection
+func runListShell(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// List all .db files in index directory
+	files, err := filepath.Glob(filepath.Join(cfg.IndexDir, "*.db"))
+	if err != nil {
+		return fmt.Errorf("failed to list indexes: %w", err)
+	}
+
+	if len(files) == 0 {
+		fmt.Println("No indexed folders found.")
+		fmt.Println("Run 'index <folder>' to create your first index.")
+		cachedIndexList = nil
+		return nil
+	}
+
+	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
+
+	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	cachedIndexList = make([]string, len(files))
+
+	for i, dbFile := range files {
+		// Get stats
+		count, err := eng.GetIndexStats(dbFile)
+		if err != nil {
+			count = 0
+		}
+
+		// Get folder path from metadata
+		folderPath, err := eng.GetFolderPath(dbFile)
+		if err != nil || folderPath == "" {
+			// Fallback to database name if no metadata
+			dbName := filepath.Base(dbFile)
+			folderPath = strings.TrimSuffix(dbName, ".db")
+		}
+
+		// Cache the folder path
+		cachedIndexList[i] = folderPath
+
+		// Get file info
+		info, _ := os.Stat(dbFile)
+
+		fmt.Printf("%d. %s\n", i+1, folderPath)
+		fmt.Printf("   📄 Documents: %d\n", count)
+		fmt.Printf("   💾 Database: %s\n", dbFile)
+		if info != nil {
+			fmt.Printf("   🕐 Last modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("💡 Tip: Use 'use <number>' to quickly select an index")
+
+	return nil
+}
+
+// useIndexByNumber sets the current index based on the number from the list
+func useIndexByNumber(num int) error {
+	if cachedIndexList == nil || len(cachedIndexList) == 0 {
+		return fmt.Errorf("no cached index list. Run 'list' first")
+	}
+
+	if num < 1 || num > len(cachedIndexList) {
+		return fmt.Errorf("invalid number %d. Must be between 1 and %d", num, len(cachedIndexList))
+	}
+
+	currentIndex = cachedIndexList[num-1]
+	return nil
+}
+
+// parseSearchArgs parses search command arguments to extract query and --top flag
+func parseSearchArgs(args []string) (query string, topN int) {
+	topN = 5 // default
+	queryParts := []string{}
+
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--top" || args[i] == "-t" {
+			// Next arg should be the number
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil {
+					topN = n
+					i++ // skip the number
+					continue
+				}
+			}
+		} else {
+			queryParts = append(queryParts, args[i])
+		}
+	}
+
+	query = strings.Join(queryParts, " ")
+	return query, topN
 }
