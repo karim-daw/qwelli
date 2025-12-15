@@ -33,33 +33,22 @@ func NewSearchCmd() *cobra.Command {
 }
 
 func runSearch(query, indexPath string, topK int) error {
-	// Resolve to absolute path
 	absPath, err := filepath.Abs(indexPath)
 	if err != nil {
 		return fmt.Errorf("invalid index path: %w", err)
 	}
 
-	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	// Find database file
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
-
-	// Check if database exists
-	if _, err := filepath.Abs(dbPath); err != nil {
-		return fmt.Errorf("index not found for %s. Run 'qwelli index %s' first", absPath, absPath)
-	}
+	dbPath := filepath.Join(cfg.IndexDir, generateDBName(absPath))
 
 	fmt.Printf("🔍 Searching for: \"%s\"\n\n", query)
 
-	// Create engine
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
 
-	// Perform search
 	results, err := eng.Search(query, dbPath, topK)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
@@ -70,16 +59,12 @@ func runSearch(query, indexPath string, topK int) error {
 		return nil
 	}
 
-	// Display results
 	for i, result := range results {
 		fmt.Printf("Result %d:\n", i+1)
 		fmt.Printf("  📄 File: %s\n", result.FileName)
 		fmt.Printf("  📁 Path: %s\n", result.FilePath)
 		fmt.Printf("  📏 Distance: %.4f\n", result.Distance)
-
-		// Show content preview
-		preview := truncate(result.Content, 150)
-		fmt.Printf("  📝 Preview: %s\n", preview)
+		fmt.Printf("  📝 Preview: %s\n", truncate(result.Content, 150))
 		fmt.Println()
 	}
 
