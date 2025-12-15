@@ -215,7 +215,7 @@ Examples:
 }
 
 // runListShell lists all indexed folders and caches them for numeric selection
-func runListShell(cmd *cobra.Command, args []string) error {
+func runListShell(_ *cobra.Command, _ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
