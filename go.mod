@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/duckdb/duckdb-go/v2 v2.5.4
 	github.com/joho/godotenv v1.5.1
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/spf13/cobra v1.10.2
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10
