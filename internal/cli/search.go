@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -48,6 +49,11 @@ func runSearch(query, indexPath string, topK int) error {
 	fmt.Printf("🔍 Searching for: \"%s\"\n\n", query)
 
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+
+	// check if the index exists
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return fmt.Errorf("index not found: %s", dbPath)
+	}
 
 	results, err := eng.Search(query, dbPath, topK)
 	if err != nil {
