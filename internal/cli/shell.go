@@ -10,13 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var currentIndex string // Track current index for the session
+var currentIndex string
 
 func NewShellCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "shell",
 		Short: "Start interactive shell",
-		Long:  "Start an interactive qwelli shell",
 		RunE:  runShell,
 	}
 }
@@ -24,20 +23,16 @@ func NewShellCmd() *cobra.Command {
 func runShell(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
-	// Load config to show current model
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("⚠️  Warning: %v\n", err)
-		fmt.Println("Run 'init' to set up configuration first")
-		fmt.Println()
+		fmt.Println("Run 'init' to set up configuration first\n")
 	} else {
-		fmt.Printf("📊 Current model: %s\n", cfg.Model)
-		fmt.Println()
+		fmt.Printf("📊 Current model: %s\n\n", cfg.Model)
 	}
 
 	fmt.Println("🔍 Qwelli Interactive Shell")
-	fmt.Println("Type 'help' for commands, 'exit' to quit")
-	fmt.Println()
+	fmt.Println("Type 'help' for commands, 'exit' to quit\n")
 
 	for {
 		prompt := "qwelli"
@@ -56,7 +51,6 @@ func runShell(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Parse command
 		parts := strings.Fields(input)
 		command := parts[0]
 		cmdArgs := parts[1:]
@@ -85,7 +79,6 @@ func runShell(cmd *cobra.Command, args []string) error {
 			if err := runIndex(cmd, cmdArgs); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			} else {
-				// Set as current index
 				currentIndex = cmdArgs[0]
 			}
 
@@ -130,67 +123,51 @@ func runShell(cmd *cobra.Command, args []string) error {
 			if len(cmdArgs) > 0 {
 				indexPath = cmdArgs[0]
 			}
-
 			if indexPath == "" {
 				fmt.Println("❌ No index specified. Use 'use <folder>' first")
 				continue
 			}
-
 			if err := runStatus(indexPath); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
 		case "model":
+			cfg, err := config.Load()
+			if err != nil {
+				fmt.Printf("❌ Error: %v\n", err)
+				continue
+			}
 			if len(cmdArgs) == 0 {
-				// Show current model
-				cfg, err := config.Load()
-				if err != nil {
-					fmt.Printf("❌ Error: %v\n", err)
-				} else {
-					fmt.Printf("📊 Current model: %s\n", cfg.Model)
-				}
+				fmt.Printf("📊 Current model: %s\n", cfg.Model)
 			} else {
-				// Change model
-				cfg, err := config.Load()
-				if err != nil {
-					fmt.Printf("❌ Error: %v\n", err)
-					continue
-				}
 				cfg.Model = cmdArgs[0]
 				if err := cfg.Save(); err != nil {
-					fmt.Printf("❌ Error saving config: %v\n", err)
+					fmt.Printf("❌ Error: %v\n", err)
 				} else {
 					fmt.Printf("✅ Model changed to: %s\n", cfg.Model)
-					fmt.Println("⚠️  You'll need to re-index to use the new model for searching")
+					fmt.Println("⚠️  Re-index to use the new model")
 				}
 			}
 
 		default:
-			fmt.Printf("❌ Unknown command: %s\n", command)
-			fmt.Println("Type 'help' for available commands")
+			fmt.Printf("❌ Unknown command: %s\nType 'help' for available commands\n", command)
 		}
-
 		fmt.Println()
 	}
 }
 
 func printShellHelp() {
-	fmt.Println("Available commands:")
-	fmt.Println()
-	fmt.Println("  init                 - Initialize configuration")
-	fmt.Println("  index <folder>       - Index a folder (sets as current)")
-	fmt.Println("  use <folder>         - Set current index folder")
-	fmt.Println("  search <query>       - Search current index")
-	fmt.Println("  list                 - List all indexed folders")
-	fmt.Println("  status [folder]      - Show status of current/specified index")
-	fmt.Println("  model [name]         - Show or change embedding model")
-	fmt.Println()
-	fmt.Println("  clear                - Clear screen")
-	fmt.Println("  help                 - Show this help")
-	fmt.Println("  exit                 - Exit shell")
-	fmt.Println()
-	fmt.Println("Tips:")
-	fmt.Println("  - Use 'index <folder>' to index and auto-select it")
-	fmt.Println("  - Use 'use <folder>' to switch between indexed folders")
-	fmt.Println("  - Current index is shown in prompt: qwelli [folder]>")
+	fmt.Println(`Available commands:
+
+  init              - Initialize configuration
+  index <folder>    - Index a folder (sets as current)
+  use <folder>      - Set current index folder
+  search <query>    - Search current index
+  list              - List all indexed folders
+  status [folder]   - Show index status
+  model [name]      - Show or change embedding model
+
+  clear             - Clear screen
+  help              - Show this help
+  exit              - Exit shell`)
 }
