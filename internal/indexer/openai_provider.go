@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/karim-daw/qwelli/internal/processor"
 )
 
 // OpenAIProvider implements EmbeddingProvider for OpenAI API
@@ -128,7 +130,7 @@ func (p *OpenAIProvider) createBatches(texts []string) []batch {
 	}
 
 	for _, text := range texts {
-		estimatedTokens := estimateTokens(text)
+		estimatedTokens := processor.EstimateTokens(text)
 
 		// If this single text exceeds the limit, it goes in its own batch
 		if estimatedTokens > maxTokensPerBatch {
@@ -162,13 +164,6 @@ func (p *OpenAIProvider) createBatches(texts []string) []batch {
 	}
 
 	return batches
-}
-
-// estimateTokens provides a rough estimate of tokens for a text
-// Rule of thumb: ~4 characters per token for English text
-func estimateTokens(text string) int {
-	// Conservative estimate: 3 chars per token (safer than 4)
-	return (len(text) + 2) / 3
 }
 
 // callAPI makes the API call to OpenAI
