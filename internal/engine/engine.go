@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/indexer"
+	"github.com/karim-daw/qwelli/internal/processor"
 )
 
 type Engine struct {
@@ -30,6 +32,7 @@ type SearchResult struct {
 	FileName string
 	Distance float64
 	Content  string
+	Metadata map[string]interface{}
 }
 
 func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(current, total int, filename string)) error {
@@ -87,30 +90,56 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(cu
 		}
 
 		info, err := os.Stat(f)
-		if err != nil || info.Size() > 500*1024 {
-			continue
-		}
-
-		content, err := os.ReadFile(f)
 		if err != nil {
 			continue
 		}
 
-		metadata, _ := json.Marshal(map[string]string{
-			"indexed_at": time.Now().Format(time.RFC3339),
-			"file_name":  filepath.Base(f),
-		})
+		// Route to appropriate processor based on file type
+		if strings.ToLower(filepath.Ext(f)) == ".pdf" {
+			// Process PDF file
+			pdfDocs, pdfContents := processPDFFile(f, info)
+			docs = append(docs, pdfDocs...)
+			contents = append(contents, pdfContents...)
+		} else {
+			// Skip very large text files (keep limit for non-PDFs)
+			if info.Size() > 500*1024 {
+				continue
+			}
 
-		docs = append(docs, db.Document{
-			ID:         generateDocID(f),
-			Path:       f,
-			FileType:   getFileType(f),
-			ModifiedAt: info.ModTime(),
-			Size:       info.Size(),
-			Metadata:   metadata,
-			Content:    string(content),
-		})
-		contents = append(contents, string(content))
+			// Read text file
+			content, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+
+			// Estimate tokens
+			estimatedTokens := processor.EstimateTokens(string(content))
+
+			// Apply chunking if content is large
+			if estimatedTokens > 1000 {
+				// Chunk large text files
+				textDocs, textContents := chunkTextFile(f, string(content), info)
+				docs = append(docs, textDocs...)
+				contents = append(contents, textContents...)
+			} else {
+				// Small files: keep as single document
+				metadata, _ := json.Marshal(map[string]string{
+					"indexed_at": time.Now().Format(time.RFC3339),
+					"file_name":  filepath.Base(f),
+				})
+
+				docs = append(docs, db.Document{
+					ID:         generateDocID(f),
+					Path:       f,
+					FileType:   getFileType(f),
+					ModifiedAt: info.ModTime(),
+					Size:       info.Size(),
+					Metadata:   metadata,
+					Content:    string(content),
+				})
+				contents = append(contents, string(content))
+			}
+		}
 	}
 
 	// Insert documents
@@ -163,11 +192,32 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 		if err != nil {
 			continue
 		}
+
+		// Parse metadata from database
+		var metadata map[string]interface{}
+		if metaBytes, ok := doc.Metadata.([]byte); ok {
+			if err := json.Unmarshal(metaBytes, &metadata); err != nil {
+				log.Printf("Failed to unmarshal metadata (bytes): %v", err)
+			}
+		} else if metaStr, ok := doc.Metadata.(string); ok {
+			if err := json.Unmarshal([]byte(metaStr), &metadata); err != nil {
+				log.Printf("Failed to unmarshal metadata (string): %v", err)
+			}
+		} else {
+			// Try direct type assertion in case DuckDB returns it as map already
+			if metaMap, ok := doc.Metadata.(map[string]interface{}); ok {
+				metadata = metaMap
+			} else {
+				log.Printf("Metadata type: %T, value: %v", doc.Metadata, doc.Metadata)
+			}
+		}
+
 		out = append(out, SearchResult{
 			FilePath: doc.Path,
 			FileName: filepath.Base(doc.Path),
 			Distance: r.Distance,
 			Content:  strings.TrimSpace(doc.Content),
+			Metadata: metadata,
 		})
 	}
 	return out, nil
@@ -203,6 +253,102 @@ func (e *Engine) GetFolderPath(dbPath string) (string, error) {
 
 // Helper functions
 
+func processPDFFile(filePath string, info os.FileInfo) ([]db.Document, []string) {
+	// Extract PDF text and metadata
+	pdfProc := processor.NewPDFProcessor()
+	pages, metadata, err := pdfProc.ExtractText(filePath)
+	if err != nil {
+		log.Printf("⚠️  Failed to process PDF %s: %v", filepath.Base(filePath), err)
+		return nil, nil
+	}
+
+	// Check if PDF has no text
+	hasText := false
+	for _, page := range pages {
+		if strings.TrimSpace(page.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+
+	if !hasText {
+		log.Printf("⚠️  Skipping image-only PDF: %s", filepath.Base(filePath))
+		return nil, nil
+	}
+
+	// Chunk the PDF
+	pdfChunker := processor.NewPDFChunker(processor.ChunkerConfig{
+		ChunkSize:   300,
+		OverlapSize: 10,
+	})
+
+	chunks, err := pdfChunker.ChunkPDFPages(pages, metadata, filePath)
+	if err != nil {
+		log.Printf("⚠️  Failed to chunk PDF %s: %v", filepath.Base(filePath), err)
+		return nil, nil
+	}
+
+	// Convert to db.Document format
+	var docs []db.Document
+	var contents []string
+
+	for i, chunk := range chunks {
+		metadataJSON, _ := json.Marshal(chunk.Metadata)
+
+		docs = append(docs, db.Document{
+			ID:         generateChunkID(filePath, i),
+			Path:       filePath,
+			FileType:   "pdf",
+			ModifiedAt: info.ModTime(),
+			Size:       info.Size(),
+			Metadata:   metadataJSON,
+			Content:    chunk.Content,
+		})
+		contents = append(contents, chunk.Content)
+	}
+
+	return docs, contents
+}
+
+func chunkTextFile(filePath string, content string, info os.FileInfo) ([]db.Document, []string) {
+	// Apply chunking to large text files
+	chunker := processor.NewChunker(processor.ChunkerConfig{
+		ChunkSize:   300,
+		OverlapSize: 10,
+	})
+
+	baseMetadata := map[string]interface{}{
+		"file_name":  filepath.Base(filePath),
+		"indexed_at": time.Now().Format(time.RFC3339),
+	}
+
+	chunks, err := chunker.ChunkByTokens(content, baseMetadata)
+	if err != nil {
+		log.Printf("⚠️  Failed to chunk file %s: %v", filepath.Base(filePath), err)
+		return nil, nil
+	}
+
+	var docs []db.Document
+	var contents []string
+
+	for i, chunk := range chunks {
+		metadataJSON, _ := json.Marshal(chunk.Metadata)
+
+		docs = append(docs, db.Document{
+			ID:         generateChunkID(filePath, i),
+			Path:       filePath,
+			FileType:   getFileType(filePath),
+			ModifiedAt: info.ModTime(),
+			Size:       info.Size(),
+			Metadata:   metadataJSON,
+			Content:    chunk.Content,
+		})
+		contents = append(contents, chunk.Content)
+	}
+
+	return docs, contents
+}
+
 func scanFolder(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -232,13 +378,20 @@ func isTextFile(path string) bool {
 		".tsx": true, ".jsx": true, ".java": true, ".c": true, ".cpp": true, ".h": true,
 		".rs": true, ".rb": true, ".php": true, ".cs": true, ".swift": true,
 		".html": true, ".css": true, ".scss": true, ".yaml": true, ".yml": true,
-		".toml": true, ".sh": true, ".sql": true, ".proto": true, ".graphql": true,
+		".toml": true, ".sh": true, ".proto": true, ".graphql": true,
+		".pdf": true, // PDF support
 	}
 	return textExts[ext]
 }
 
 func generateDocID(path string) string {
 	hash := md5.Sum([]byte(path))
+	return hex.EncodeToString(hash[:])
+}
+
+func generateChunkID(path string, chunkIndex int) string {
+	source := fmt.Sprintf("%s:chunk:%d", path, chunkIndex)
+	hash := md5.Sum([]byte(source))
 	return hex.EncodeToString(hash[:])
 }
 
