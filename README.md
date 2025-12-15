@@ -47,17 +47,22 @@ QWELLI_EMBEDDING_MODEL=text-embedding-3-small
 QWELLI_EMBEDDING_ENDPOINT=https://api.openai.com/v1/embeddings
 ```
 
-### 3. Run with Go
+### 3. Build and Run (Windows)
 
-```bash
-# Interactive shell
-go run cmd/qwelli/main.go shell
+```powershell
+# Build the binary
+go build -o qwelli.exe ./cmd/qwelli
 
-# Or individual commands
-go run cmd/qwelli/main.go init
-go run cmd/qwelli/main.go index ./my-folder
-go run cmd/qwelli/main.go search "query" --index ./my-folder
+# Run interactive shell
+.\qwelli.exe shell
+
+# Or use individual commands
+.\qwelli.exe init
+.\qwelli.exe index ./my-folder
+.\qwelli.exe search "query" --index ./my-folder
 ```
+
+**Important:** The `shell` command requires an interactive terminal. Always use the built binary (`.\qwelli.exe`) instead of `go run` for reliable operation, especially for the interactive shell.
 
 ## Usage
 
