@@ -52,12 +52,14 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	dbPath := filepath.Join(cfg.IndexDir, dbName)
 
 	fmt.Printf("📂 Indexing folder: %s\n", absPath)
-	fmt.Printf("💾 Database: %s\n\n", dbPath)
 
 	// Check if the index exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		return fmt.Errorf("index not found: %s", dbPath)
 	}
+
+	fmt.Printf("💾 Database: %s\n\n", dbPath)
+
 	// Create engine
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
 
