@@ -140,7 +140,9 @@ qwelli> exit                    # Exit
 
 ### Supported File Types
 
-Text files only: `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.yaml`, `.yml`, `.toml`, `.sh`, `.sql`
+Text files only: `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.yaml`, `.yml`, `.toml`, `.sh`, `.proto`, `.graphql`
+
+**Note:** SQL files (`.sql`) are excluded as they can be very large (database dumps) and aren't suitable for semantic search.
 
 Files >500KB and hidden files/folders are skipped.
 
