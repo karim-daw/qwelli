@@ -38,3 +38,4 @@ build/libs/duckdb.hpp
 build/libs/duckdb.lib
 qwelli
 /tests/demo/pdf_samples
+internal/processor_v2/images/
