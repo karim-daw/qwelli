@@ -109,7 +109,7 @@ func TestParsePDFDate(t *testing.T) {
 // This test will be skipped if no sample PDF is available
 func TestExtractText_WithSamplePDF(t *testing.T) {
 	// Look for a sample PDF in the tests directory
-	samplePath := filepath.Join("..", "..", "tests", "pdf_samples", "simple.pdf")
+	samplePath := filepath.Join("..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf")
 
 	if _, err := os.Stat(samplePath); os.IsNotExist(err) {
 		t.Skip("Sample PDF not found, skipping test")

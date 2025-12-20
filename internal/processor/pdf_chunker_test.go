@@ -44,25 +44,28 @@ func TestChunkPDFPages_SmallPDF(t *testing.T) {
 		t.Fatalf("ChunkPDFPages failed: %v", err)
 	}
 
-	// Small PDF should result in 1 chunk
-	if len(chunks) != 1 {
-		t.Errorf("Expected 1 chunk, got %d", len(chunks))
+	// Small PDF with 2 pages results in 2 chunks (one per page)
+	if len(chunks) != 2 {
+		t.Errorf("Expected 2 chunks, got %d", len(chunks))
 	}
 
+	// Verify first chunk
 	chunk := chunks[0]
-
-	// Verify chunk metadata
 	if chunk.ChunkIndex != 0 {
 		t.Errorf("Expected chunk_index 0, got %d", chunk.ChunkIndex)
 	}
 
-	if chunk.TotalChunks != 1 {
-		t.Errorf("Expected total_chunks 1, got %d", chunk.TotalChunks)
+	if chunk.TotalChunks != 2 {
+		t.Errorf("Expected total_chunks 2, got %d", chunk.TotalChunks)
 	}
 
-	// Verify page numbers
-	if len(chunk.PageNumbers) != 2 {
-		t.Errorf("Expected 2 page numbers, got %d", len(chunk.PageNumbers))
+	// Each chunk should have 1 page number
+	if len(chunk.PageNumbers) != 1 {
+		t.Errorf("Expected 1 page number in first chunk, got %d", len(chunk.PageNumbers))
+	}
+
+	if chunk.PageNumbers[0] != 1 {
+		t.Errorf("Expected first chunk to be page 1, got %d", chunk.PageNumbers[0])
 	}
 
 	// Verify metadata fields
