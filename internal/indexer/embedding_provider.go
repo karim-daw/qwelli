@@ -8,41 +8,45 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/karim-daw/qwelli/internal/processor"
 )
 
-// OpenAIProvider implements EmbeddingProvider for OpenAI API
-type OpenAIProvider struct {
+// HTTPEmbeddingProvider implements EmbeddingProvider for HTTP-based embedding APIs
+// Works with OpenAI, VoyageAI, and other compatible APIs
+type HTTPEmbeddingProvider struct {
 	apiKey   string
 	model    string
 	endpoint string
 	client   *http.Client
 }
 
-// OpenAI API request/response structures
-type openAIRequest struct {
+// Embedding API request/response structures (OpenAI-compatible format)
+type embeddingRequest struct {
 	Model string `json:"model"`
 	Input any    `json:"input"` // string or []string
 }
 
-type openAIResponse struct {
+type embeddingResponse struct {
 	Data []struct {
 		Embedding []float64 `json:"embedding"`
 	} `json:"data"`
 }
 
-// NewOpenAIProvider creates a new OpenAI embedding provider
-func NewOpenAIProvider(apiKey, model, endpoint string) (*OpenAIProvider, error) {
+// NewHTTPEmbeddingProvider creates a new HTTP-based embedding provider
+// Works with OpenAI, VoyageAI, and other compatible APIs
+func NewHTTPEmbeddingProvider(apiKey, model, endpoint string) (*HTTPEmbeddingProvider, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key required")
+		return nil, fmt.Errorf("API key required")
 	}
 	if model == "" {
-		return nil, fmt.Errorf("OpenAI model required")
+		return nil, fmt.Errorf("model required")
 	}
 	if endpoint == "" {
-		return nil, fmt.Errorf("OpenAI endpoint required")
+		return nil, fmt.Errorf("endpoint required")
 	}
 
-	p := &OpenAIProvider{
+	p := &HTTPEmbeddingProvider{
 		apiKey:   apiKey,
 		model:    model,
 		endpoint: endpoint,
@@ -51,12 +55,12 @@ func NewOpenAIProvider(apiKey, model, endpoint string) (*OpenAIProvider, error) 
 		},
 	}
 
-	log.Printf("✅ OpenAI provider initialized (model: %s)", model)
+	log.Printf("✅ Embedding provider initialized (model: %s)", model)
 	return p, nil
 }
 
 // Embed generates an embedding for a single text
-func (p *OpenAIProvider) Embed(text string) ([]float32, error) {
+func (p *HTTPEmbeddingProvider) Embed(text string) ([]float32, error) {
 	start := time.Now()
 
 	embeddings, err := p.callAPI(text)
@@ -73,8 +77,8 @@ func (p *OpenAIProvider) Embed(text string) ([]float32, error) {
 }
 
 // EmbedBatch generates embeddings for multiple texts with smart batching
-// to optimize API calls while respecting token limits (8192 tokens for text-embedding-3-small).
-func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float32, error) {
+// to optimize API calls while respecting token limits (8192 tokens default).
+func (p *HTTPEmbeddingProvider) EmbedBatch(texts []string) ([][]float32, error) {
 	start := time.Now()
 
 	if len(texts) == 0 {
@@ -118,8 +122,8 @@ type batch struct {
 }
 
 // createBatches groups texts into batches that respect token limits
-func (p *OpenAIProvider) createBatches(texts []string) []batch {
-	const maxTokensPerBatch = 8000 // Conservative limit (actual is 8192)
+func (p *HTTPEmbeddingProvider) createBatches(texts []string) []batch {
+	const maxTokensPerBatch = 8000 // Conservative limit (actual is 8192 for most providers)
 
 	batches := []batch{}
 	currentBatch := batch{
@@ -128,7 +132,7 @@ func (p *OpenAIProvider) createBatches(texts []string) []batch {
 	}
 
 	for _, text := range texts {
-		estimatedTokens := estimateTokens(text)
+		estimatedTokens := processor.EstimateTokens(text)
 
 		// If this single text exceeds the limit, it goes in its own batch
 		if estimatedTokens > maxTokensPerBatch {
@@ -164,16 +168,9 @@ func (p *OpenAIProvider) createBatches(texts []string) []batch {
 	return batches
 }
 
-// estimateTokens provides a rough estimate of tokens for a text
-// Rule of thumb: ~4 characters per token for English text
-func estimateTokens(text string) int {
-	// Conservative estimate: 3 chars per token (safer than 4)
-	return (len(text) + 2) / 3
-}
-
-// callAPI makes the API call to OpenAI
-func (p *OpenAIProvider) callAPI(input any) ([][]float32, error) {
-	reqBody := openAIRequest{
+// callAPI makes the API call to the embedding provider
+func (p *HTTPEmbeddingProvider) callAPI(input any) ([][]float32, error) {
+	reqBody := embeddingRequest{
 		Model: p.model,
 		Input: input,
 	}
@@ -202,7 +199,7 @@ func (p *OpenAIProvider) callAPI(input any) ([][]float32, error) {
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	var apiResp openAIResponse
+	var apiResp embeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}

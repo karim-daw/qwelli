@@ -41,13 +41,13 @@ func TestInsertAndGetDocument(t *testing.T) {
 	defer pdb.Close()
 
 	testDoc := Document{
-		ID:         "test-doc-001",
-		Path:       "/test/path/file.txt",
-		FileType:   "txt",
-		ModifiedAt: time.Now(),
-		Size:       1234,
-		Metadata:   `{"key": "value"}`,
-		Content:    "This is test content.",
+		ID:           "test-doc-001",
+		Path:         "/test/path/file.txt",
+		FileType:     "txt",
+		ModifiedAt:   time.Now(),
+		Size:         1234,
+		TextMetadata: `{"key": "value"}`,
+		Content:      "This is test content.",
 	}
 
 	if err := pdb.InsertDocument(testDoc); err != nil {
@@ -78,13 +78,13 @@ func TestInsertEmbedding(t *testing.T) {
 	defer pdb.Close()
 
 	testDoc := Document{
-		ID:         "embed-test-doc",
-		Path:       "/test/embed.txt",
-		FileType:   "txt",
-		ModifiedAt: time.Now(),
-		Size:       100,
-		Metadata:   `{}`,
-		Content:    "Test content",
+		ID:           "embed-test-doc",
+		Path:         "/test/embed.txt",
+		FileType:     "txt",
+		ModifiedAt:   time.Now(),
+		Size:         100,
+		TextMetadata: `{}`,
+		Content:      "Test content",
 	}
 
 	if err := pdb.InsertDocument(testDoc); err != nil {
@@ -125,8 +125,8 @@ func TestBuildHNSWIndex(t *testing.T) {
 	defer pdb.Close()
 
 	docs := []Document{
-		{ID: "doc-1", Path: "/1.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 100, Metadata: `{}`, Content: "Content 1"},
-		{ID: "doc-2", Path: "/2.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 200, Metadata: `{}`, Content: "Content 2"},
+		{ID: "doc-1", Path: "/1.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 100, TextMetadata: `{}`, Content: "Content 1"},
+		{ID: "doc-2", Path: "/2.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 200, TextMetadata: `{}`, Content: "Content 2"},
 	}
 
 	embeddings := []Embedding{
@@ -162,9 +162,9 @@ func TestSearchANN(t *testing.T) {
 	defer pdb.Close()
 
 	docs := []Document{
-		{ID: "doc-1", Path: "/1.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 100, Metadata: `{}`, Content: "Cats"},
-		{ID: "doc-2", Path: "/2.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 200, Metadata: `{}`, Content: "Dogs"},
-		{ID: "doc-3", Path: "/3.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 300, Metadata: `{}`, Content: "Birds"},
+		{ID: "doc-1", Path: "/1.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 100, TextMetadata: `{}`, Content: "Cats"},
+		{ID: "doc-2", Path: "/2.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 200, TextMetadata: `{}`, Content: "Dogs"},
+		{ID: "doc-3", Path: "/3.txt", FileType: "txt", ModifiedAt: time.Now(), Size: 300, TextMetadata: `{}`, Content: "Birds"},
 	}
 
 	embeddings := []Embedding{

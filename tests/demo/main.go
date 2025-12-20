@@ -25,7 +25,7 @@ func main() {
 	dbPath := "demo.db"
 	modelName := os.Getenv("QWELLI_EMBEDDING_MODEL") // text-embedding-3-small
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
-	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") //
+	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") // https://api.openai.com/v1/embeddings
 
 	// Clean up existing database
 	os.Remove(dbPath)
@@ -78,13 +78,13 @@ func main() {
 		})
 
 		docs = append(docs, db.Document{
-			ID:         generateDocID(path),
-			Path:       path,
-			FileType:   getFileType(path),
-			ModifiedAt: info.ModTime(),
-			Size:       info.Size(),
-			Metadata:   metadata,
-			Content:    string(content),
+			ID:           generateDocID(path),
+			Path:         path,
+			FileType:     getFileType(path),
+			ModifiedAt:   info.ModTime(),
+			Size:         info.Size(),
+			TextMetadata: metadata,
+			Content:      string(content),
 		})
 		contents = append(contents, string(content))
 	}

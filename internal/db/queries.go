@@ -1,10 +1,10 @@
 package db
 
 import "fmt"
-
+// TODO: add content_type 
 func (p *ProjectDB) InsertDocument(doc Document) error {
 	var metadataStr string
-	switch v := doc.Metadata.(type) {
+	switch v := doc.TextMetadata.(type) {
 	case string:
 		metadataStr = v
 	case []byte:
@@ -14,7 +14,7 @@ func (p *ProjectDB) InsertDocument(doc Document) error {
 	}
 
 	_, err := p.conn.Exec(`
-		INSERT OR REPLACE INTO documents (doc_id, path, file_type, modified_at, size, metadata, content)
+		INSERT OR REPLACE INTO documents (doc_id, path, file_type, modified_at, size, text_metadata, content)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		doc.ID, doc.Path, doc.FileType, doc.ModifiedAt.Format("2006-01-02 15:04:05"), doc.Size, metadataStr, doc.Content,
 	)

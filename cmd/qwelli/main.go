@@ -28,6 +28,7 @@ and helps you find what you're looking for with natural language queries.`,
 	rootCmd.AddCommand(cli.NewSearchCmd())
 	rootCmd.AddCommand(cli.NewListCmd())
 	rootCmd.AddCommand(cli.NewStatusCmd())
+	rootCmd.AddCommand(cli.NewDeleteCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
