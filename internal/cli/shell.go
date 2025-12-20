@@ -183,6 +183,44 @@ func runShell(cmd *cobra.Command, args []string) error {
 				}
 			}
 
+		case "delete", "remove", "rm":
+			indexPath := currentIndex
+			if len(cmdArgs) > 0 {
+				indexPath = cmdArgs[0]
+			}
+			if indexPath == "" {
+				fmt.Println("❌ No index specified. Usage: delete <folder|#>")
+				fmt.Println("   Use 'list' to see available indexes")
+				continue
+			}
+
+			// Check if argument is a number
+			if len(cmdArgs) > 0 {
+				if num, err := strconv.Atoi(cmdArgs[0]); err == nil {
+					// Numeric selection - get from cached list
+					if len(cachedIndexList) == 0 {
+						fmt.Println("❌ No cached index list. Run 'list' first")
+						continue
+					}
+					if num < 1 || num > len(cachedIndexList) {
+						fmt.Printf("❌ Invalid number %d. Must be between 1 and %d\n", num, len(cachedIndexList))
+						continue
+					}
+					indexPath = cachedIndexList[num-1]
+				}
+			}
+
+			if err := deleteIndexInteractive(indexPath, reader); err != nil {
+				fmt.Printf("❌ Error: %v\n", err)
+			} else {
+				// Clear current index if it was deleted
+				if indexPath == currentIndex {
+					currentIndex = ""
+				}
+				// Clear cached list to force refresh
+				cachedIndexList = nil
+			}
+
 		default:
 			fmt.Printf("❌ Unknown command: %s\nType 'help' for available commands\n", command)
 		}
@@ -200,6 +238,7 @@ func printShellHelp() {
     --top N, -t N       - Number of results (default: 5)
   list                  - List all indexed folders (with numbers)
   status [folder]       - Show index status
+  delete <folder|#>     - Delete an index (asks for confirmation)
   model [name]          - Show or change embedding model
 
   clear                 - Clear screen
@@ -210,6 +249,8 @@ Examples:
   list                  - Show all indexes with numbers
   use 1                 - Use the first index from the list
   use ./my-folder       - Use a specific folder path
+  delete 1              - Delete the first index from the list
+  delete ./my-folder    - Delete index for specific folder
   search hello          - Search for "hello" (top 5 results)
   search hello --top 3  - Search for "hello" (top 3 results)`)
 }
