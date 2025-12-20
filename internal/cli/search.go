@@ -70,21 +70,41 @@ func runSearch(query, indexPath string, topK int) error {
 		fmt.Printf("  📄 File: %s\n", result.FileName)
 
 		// Display page numbers if available (PDFs)
-		if pageNumbers, ok := result.TextMetadata["page_numbers"].([]interface{}); ok && len(pageNumbers) > 0 {
-			pages := make([]string, len(pageNumbers))
-			for i, p := range pageNumbers {
-				pages[i] = fmt.Sprintf("%v", p)
+		if pageNumbers, ok := result.TextMetadata["page_numbers"]; ok {
+			var pages []string
+			switch v := pageNumbers.(type) {
+			case []int:
+				for _, p := range v {
+					pages = append(pages, fmt.Sprintf("%d", p))
+				}
+			case []interface{}:
+				for _, p := range v {
+					pages = append(pages, fmt.Sprintf("%v", p))
+				}
 			}
-			fmt.Printf("  📖 Page(s): %s\n", strings.Join(pages, ", "))
+			if len(pages) > 0 {
+				fmt.Printf("  📖 Page(s): %s\n", strings.Join(pages, ", "))
+			}
 		}
 
-		// Display PDF title if available and different from filename
-		// Skip the title display for now as it's showing <nil> for PDFs without metadata titles
-
 		// Display chunk info if available
-		if chunkIdx, ok := result.TextMetadata["chunk_index"].(float64); ok {
-			if totalChunks, ok := result.TextMetadata["total_chunks"].(float64); ok {
-				fmt.Printf("  🧩 Chunk: %d of %d\n", int(chunkIdx)+1, int(totalChunks))
+		if chunkIdx, ok := result.TextMetadata["chunk_index"]; ok {
+			var idx int
+			switch v := chunkIdx.(type) {
+			case int:
+				idx = v
+			case float64:
+				idx = int(v)
+			}
+			if totalChunks, ok := result.TextMetadata["total_chunks"]; ok {
+				var total int
+				switch v := totalChunks.(type) {
+				case int:
+					total = v
+				case float64:
+					total = int(v)
+				}
+				fmt.Printf("  🧩 Chunk: %d of %d\n", idx+1, total)
 			}
 		}
 
