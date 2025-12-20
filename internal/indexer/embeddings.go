@@ -15,9 +15,10 @@ type Embedder struct {
 	provider EmbeddingProvider
 }
 
-// NewEmbedderWithProvider creates an embedder with explicit configuration
+// NewEmbedder creates an embedder with explicit configuration
+// Uses HTTP-based provider compatible with OpenAI, VoyageAI, and other APIs
 func NewEmbedder(apiKey, model, endpoint string) (*Embedder, error) {
-	provider, err := NewOpenAIProvider(apiKey, model, endpoint)
+	provider, err := NewHTTPEmbeddingProvider(apiKey, model, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding provider: %w", err)
 	}

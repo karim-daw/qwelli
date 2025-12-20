@@ -24,9 +24,9 @@ type Config struct {
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	return &Config{
-		EmbeddingProvider: "openai",
-		Model:             "text-embedding-3-small",
-		Endpoint:          "https://api.openai.com/v1/embeddings",
+		EmbeddingProvider: "voyagerAI",
+		Model:             "voyage-3-large",
+		Endpoint:          "https://api.voyageai.com/v1/embeddings",
 		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }

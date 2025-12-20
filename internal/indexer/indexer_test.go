@@ -10,7 +10,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func TestNewOpenAIProvider_Validation(t *testing.T) {
+func TestNewHTTPEmbeddingProvider_Validation(t *testing.T) {
 	_ = godotenv.Load()
 
 	tests := []struct {
@@ -25,17 +25,17 @@ func TestNewOpenAIProvider_Validation(t *testing.T) {
 			name:     "missing_api_key",
 			apiKey:   "",
 			model:    "text-embedding-3-small",
-			endpoint: "https://api.openai.com/v1/embeddings",
+			endpoint: "https://api.example.com/v1/embeddings",
 			wantErr:  true,
-			errMsg:   "OpenAI API key required",
+			errMsg:   "API key required",
 		},
 		{
 			name:     "missing_model",
 			apiKey:   "test-key",
 			model:    "",
-			endpoint: "https://api.openai.com/v1/embeddings",
+			endpoint: "https://api.example.com/v1/embeddings",
 			wantErr:  true,
-			errMsg:   "OpenAI model required",
+			errMsg:   "model required",
 		},
 		{
 			name:     "missing_endpoint",
@@ -43,34 +43,34 @@ func TestNewOpenAIProvider_Validation(t *testing.T) {
 			model:    "text-embedding-3-small",
 			endpoint: "",
 			wantErr:  true,
-			errMsg:   "OpenAI endpoint required",
+			errMsg:   "endpoint required",
 		},
 		{
 			name:     "valid_config",
 			apiKey:   "test-key",
 			model:    "text-embedding-3-small",
-			endpoint: "https://api.openai.com/v1/embeddings",
+			endpoint: "https://api.example.com/v1/embeddings",
 			wantErr:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewOpenAIProvider(tt.apiKey, tt.model, tt.endpoint)
+			provider, err := NewHTTPEmbeddingProvider(tt.apiKey, tt.model, tt.endpoint)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("NewOpenAIProvider() expected error, got nil")
+					t.Fatal("NewHTTPEmbeddingProvider() expected error, got nil")
 				}
 				if tt.errMsg != "" && err.Error() != tt.errMsg {
 					t.Errorf("error = %q, want %q", err.Error(), tt.errMsg)
 				}
 			} else {
 				if err != nil {
-					t.Fatalf("NewOpenAIProvider() error = %v, want nil", err)
+					t.Fatalf("NewHTTPEmbeddingProvider() error = %v, want nil", err)
 				}
 				if provider == nil {
-					t.Fatal("NewOpenAIProvider() returned nil provider")
+					t.Fatal("NewHTTPEmbeddingProvider() returned nil provider")
 				}
 			}
 		})
@@ -96,8 +96,8 @@ func TestNewEmbedder_Validation(t *testing.T) {
 	})
 }
 
-// mockOpenAIResponse creates a mock OpenAI embedding response
-func mockOpenAIResponse(embeddings [][]float64) openAIResponse {
+// mockEmbeddingResponse creates a mock embedding response
+func mockEmbeddingResponse(embeddings [][]float64) embeddingResponse {
 	data := make([]struct {
 		Embedding []float64 `json:"embedding"`
 	}, len(embeddings))
@@ -106,10 +106,10 @@ func mockOpenAIResponse(embeddings [][]float64) openAIResponse {
 		data[i].Embedding = emb
 	}
 
-	return openAIResponse{Data: data}
+	return embeddingResponse{Data: data}
 }
 
-func TestOpenAIProvider_Embed_MockServer(t *testing.T) {
+func TestHTTPEmbeddingProvider_Embed_MockServer(t *testing.T) {
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -126,7 +126,7 @@ func TestOpenAIProvider_Embed_MockServer(t *testing.T) {
 		}
 
 		// Parse request
-		var req openAIRequest
+		var req embeddingRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("failed to decode request: %v", err)
 		}
@@ -136,16 +136,16 @@ func TestOpenAIProvider_Embed_MockServer(t *testing.T) {
 		}
 
 		// Return mock response (4-dimension embedding)
-		resp := mockOpenAIResponse([][]float64{{0.1, 0.2, 0.3, 0.4}})
+		resp := mockEmbeddingResponse([][]float64{{0.1, 0.2, 0.3, 0.4}})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
 	// Create provider with mock server
-	provider, err := NewOpenAIProvider("test-api-key", "test-model", server.URL)
+	provider, err := NewHTTPEmbeddingProvider("test-api-key", "test-model", server.URL)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	// Test embed
@@ -166,16 +166,16 @@ func TestOpenAIProvider_Embed_MockServer(t *testing.T) {
 	}
 }
 
-func TestOpenAIProvider_EmbedBatch_MockServer(t *testing.T) {
+func TestHTTPEmbeddingProvider_EmbedBatch_MockServer(t *testing.T) {
 	// Create mock server for batch requests
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req openAIRequest
+		var req embeddingRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("failed to decode request: %v", err)
 		}
 
 		// Return 3 embeddings for batch request
-		resp := mockOpenAIResponse([][]float64{
+		resp := mockEmbeddingResponse([][]float64{
 			{1.0, 0.0, 0.0, 0.0},
 			{0.0, 1.0, 0.0, 0.0},
 			{0.0, 0.0, 1.0, 0.0},
@@ -185,9 +185,9 @@ func TestOpenAIProvider_EmbedBatch_MockServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewOpenAIProvider("test-api-key", "test-model", server.URL)
+	provider, err := NewHTTPEmbeddingProvider("test-api-key", "test-model", server.URL)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	texts := []string{"text1", "text2", "text3"}
@@ -209,7 +209,7 @@ func TestOpenAIProvider_EmbedBatch_MockServer(t *testing.T) {
 	}
 }
 
-func TestOpenAIProvider_APIError(t *testing.T) {
+func TestHTTPEmbeddingProvider_APIError(t *testing.T) {
 	// Create mock server that returns an error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -217,9 +217,9 @@ func TestOpenAIProvider_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewOpenAIProvider("invalid-key", "test-model", server.URL)
+	provider, err := NewHTTPEmbeddingProvider("invalid-key", "test-model", server.URL)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	_, err = provider.Embed("test text")
@@ -228,7 +228,7 @@ func TestOpenAIProvider_APIError(t *testing.T) {
 	}
 }
 
-func TestOpenAIProvider_MalformedResponse(t *testing.T) {
+func TestHTTPEmbeddingProvider_MalformedResponse(t *testing.T) {
 	// Create mock server that returns invalid JSON
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -236,9 +236,9 @@ func TestOpenAIProvider_MalformedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewOpenAIProvider("test-key", "test-model", server.URL)
+	provider, err := NewHTTPEmbeddingProvider("test-key", "test-model", server.URL)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	_, err = provider.Embed("test text")
@@ -247,11 +247,11 @@ func TestOpenAIProvider_MalformedResponse(t *testing.T) {
 	}
 }
 
-func TestOpenAIProvider_WrongEmbeddingCount(t *testing.T) {
+func TestHTTPEmbeddingProvider_WrongEmbeddingCount(t *testing.T) {
 	// Create mock server that returns wrong number of embeddings
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return 2 embeddings when only 1 was requested
-		resp := mockOpenAIResponse([][]float64{
+		resp := mockEmbeddingResponse([][]float64{
 			{0.1, 0.2, 0.3, 0.4},
 			{0.5, 0.6, 0.7, 0.8},
 		})
@@ -260,9 +260,9 @@ func TestOpenAIProvider_WrongEmbeddingCount(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewOpenAIProvider("test-key", "test-model", server.URL)
+	provider, err := NewHTTPEmbeddingProvider("test-key", "test-model", server.URL)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	_, err = provider.Embed("test text")
@@ -271,17 +271,17 @@ func TestOpenAIProvider_WrongEmbeddingCount(t *testing.T) {
 	}
 }
 
-// Tests using real OpenAI API (skipped if env vars not set)
-func TestOpenAIProvider_RealAPI(t *testing.T) {
+// Tests using real embedding API (works with OpenAI, VoyageAI, etc.)
+func TestHTTPEmbeddingProvider_RealAPI(t *testing.T) {
 	_ = godotenv.Load("../../.env")
 
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
 	model := os.Getenv("QWELLI_EMBEDDING_MODEL")
 	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT")
 
-	provider, err := NewOpenAIProvider(apiKey, model, endpoint)
+	provider, err := NewHTTPEmbeddingProvider(apiKey, model, endpoint)
 	if err != nil {
-		t.Fatalf("NewOpenAIProvider() error = %v", err)
+		t.Fatalf("NewHTTPEmbeddingProvider() error = %v", err)
 	}
 
 	t.Run("embed_single", func(t *testing.T) {
