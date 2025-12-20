@@ -28,11 +28,11 @@ func NewEngine(apiKey, model, endpoint string) *Engine {
 }
 
 type SearchResult struct {
-	FilePath string
-	FileName string
-	Distance float64
-	Content  string
-	Metadata map[string]interface{}
+	FilePath     string
+	FileName     string
+	Distance     float64
+	Content      string
+	TextMetadata map[string]interface{}
 }
 
 func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(current, total int, filename string)) error {
@@ -129,13 +129,13 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(cu
 				})
 
 				docs = append(docs, db.Document{
-					ID:         generateDocID(f),
-					Path:       f,
-					FileType:   getFileType(f),
-					ModifiedAt: info.ModTime(),
-					Size:       info.Size(),
-					Metadata:   metadata,
-					Content:    string(content),
+					ID:           generateDocID(f),
+					Path:         f,
+					FileType:     getFileType(f),
+					ModifiedAt:   info.ModTime(),
+					Size:         info.Size(),
+					TextMetadata: metadata,
+					Content:      string(content),
 				})
 				contents = append(contents, string(content))
 			}
@@ -195,29 +195,29 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 
 		// Parse metadata from database
 		var metadata map[string]interface{}
-		if metaBytes, ok := doc.Metadata.([]byte); ok {
+		if metaBytes, ok := doc.TextMetadata.([]byte); ok {
 			if err := json.Unmarshal(metaBytes, &metadata); err != nil {
 				log.Printf("Failed to unmarshal metadata (bytes): %v", err)
 			}
-		} else if metaStr, ok := doc.Metadata.(string); ok {
+		} else if metaStr, ok := doc.TextMetadata.(string); ok {
 			if err := json.Unmarshal([]byte(metaStr), &metadata); err != nil {
 				log.Printf("Failed to unmarshal metadata (string): %v", err)
 			}
 		} else {
 			// Try direct type assertion in case DuckDB returns it as map already
-			if metaMap, ok := doc.Metadata.(map[string]interface{}); ok {
+			if metaMap, ok := doc.TextMetadata.(map[string]interface{}); ok {
 				metadata = metaMap
 			} else {
-				log.Printf("Metadata type: %T, value: %v", doc.Metadata, doc.Metadata)
+				log.Printf("Metadata type: %T, value: %v", doc.TextMetadata, doc.TextMetadata)
 			}
 		}
 
 		out = append(out, SearchResult{
-			FilePath: doc.Path,
-			FileName: filepath.Base(doc.Path),
-			Distance: r.Distance,
-			Content:  strings.TrimSpace(doc.Content),
-			Metadata: metadata,
+			FilePath:     doc.Path,
+			FileName:     filepath.Base(doc.Path),
+			Distance:     r.Distance,
+			Content:      strings.TrimSpace(doc.Content),
+			TextMetadata: metadata,
 		})
 	}
 	return out, nil
@@ -296,13 +296,13 @@ func processPDFFile(filePath string, info os.FileInfo) ([]db.Document, []string)
 		metadataJSON, _ := json.Marshal(chunk.Metadata)
 
 		docs = append(docs, db.Document{
-			ID:         generateChunkID(filePath, i),
-			Path:       filePath,
-			FileType:   "pdf",
-			ModifiedAt: info.ModTime(),
-			Size:       info.Size(),
-			Metadata:   metadataJSON,
-			Content:    chunk.Content,
+			ID:           generateChunkID(filePath, i),
+			Path:         filePath,
+			FileType:     "pdf",
+			ModifiedAt:   info.ModTime(),
+			Size:         info.Size(),
+			TextMetadata: metadataJSON,
+			Content:      chunk.Content,
 		})
 		contents = append(contents, chunk.Content)
 	}
@@ -335,13 +335,13 @@ func chunkTextFile(filePath string, content string, info os.FileInfo) ([]db.Docu
 		metadataJSON, _ := json.Marshal(chunk.Metadata)
 
 		docs = append(docs, db.Document{
-			ID:         generateChunkID(filePath, i),
-			Path:       filePath,
-			FileType:   getFileType(filePath),
-			ModifiedAt: info.ModTime(),
-			Size:       info.Size(),
-			Metadata:   metadataJSON,
-			Content:    chunk.Content,
+			ID:           generateChunkID(filePath, i),
+			Path:         filePath,
+			FileType:     getFileType(filePath),
+			ModifiedAt:   info.ModTime(),
+			Size:         info.Size(),
+			TextMetadata: metadataJSON,
+			Content:      chunk.Content,
 		})
 		contents = append(contents, chunk.Content)
 	}
