@@ -477,11 +477,6 @@ func isTextFile(path string) bool {
 	return textExts[ext]
 }
 
-func generateDocID(path string) string {
-	hash := md5.Sum([]byte(path))
-	return hex.EncodeToString(hash[:])
-}
-
 func generateFileID(path string) string {
 	hash := md5.Sum([]byte(path))
 	return hex.EncodeToString(hash[:])
