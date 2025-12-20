@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -15,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/indexer"
+	"github.com/karim-daw/qwelli/internal/processor"
 )
 
 func main() {
@@ -62,36 +62,75 @@ func main() {
 
 	// Process files
 	fmt.Println("\n📄 Indexing files...")
-	var docs []db.Document
+	var filesList []db.File
+	var chunksList []db.Chunk
 	var contents []string
 
 	for _, path := range files {
-		content, err := os.ReadFile(path)
+		// Normalize path to absolute
+		absPath, err := filepath.Abs(path)
 		if err != nil {
 			continue
 		}
-		info, _ := os.Stat(path)
 
-		metadata, _ := json.Marshal(map[string]string{
-			"indexed_at": time.Now().Format(time.RFC3339),
-			"file_name":  filepath.Base(path),
-		})
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(absPath)
+		if err != nil {
+			continue
+		}
 
-		docs = append(docs, db.Document{
-			ID:           generateDocID(path),
-			Path:         path,
-			FileType:     getFileType(path),
-			ModifiedAt:   info.ModTime(),
-			Size:         info.Size(),
-			TextMetadata: metadata,
-			Content:      string(content),
-		})
+		// Compute file hash
+		fileHash, err := processor.ComputeSHA256(absPath)
+		if err != nil {
+			log.Printf("⚠️  Failed to compute hash for %s: %v", absPath, err)
+			continue
+		}
+
+		// Create file record
+		fileID := generateFileID(absPath)
+		file := db.File{
+			FileID:     fileID,
+			Path:       absPath,
+			FileType:   getFileType(absPath),
+			FileHash:   fileHash,
+			ModifiedAt: info.ModTime(),
+			Size:       info.Size(),
+			IndexedAt:  time.Now(),
+		}
+		filesList = append(filesList, file)
+
+		// Create a single chunk for the entire file content
+		chunkID := generateChunkID(fileID, 0)
+		chunk := db.Chunk{
+			ChunkID:     chunkID,
+			FileID:      fileID,
+			FilePath:    absPath,
+			FileType:    getFileType(absPath),
+			ChunkIndex:  0,
+			TotalChunks: 1,
+			Content:     string(content),
+		}
+		chunksList = append(chunksList, chunk)
 		contents = append(contents, string(content))
 	}
 
-	// Insert documents
-	for _, doc := range docs {
-		projectDB.InsertDocument(doc)
+	// Insert files
+	for _, file := range filesList {
+		if err := projectDB.InsertFile(file); err != nil {
+			log.Printf("⚠️  Failed to insert file %s: %v", file.Path, err)
+			continue
+		}
+	}
+
+	// Insert chunks
+	for _, chunk := range chunksList {
+		if err := projectDB.InsertChunk(chunk); err != nil {
+			log.Printf("⚠️  Failed to insert chunk for %s: %v", chunk.FilePath, err)
+			continue
+		}
 	}
 
 	// Generate embeddings
@@ -102,8 +141,11 @@ func main() {
 
 	// Insert embeddings
 	for i, vec := range embeddings {
-		projectDB.InsertEmbedding(db.Embedding{DocID: docs[i].ID, Vector: vec})
-		fmt.Printf("  ✓ %s\n", filepath.Base(docs[i].Path))
+		if err := projectDB.InsertEmbedding(db.Embedding{ChunkID: chunksList[i].ChunkID, Vector: vec}); err != nil {
+			log.Printf("⚠️  Failed to insert embedding for %s: %v", chunksList[i].FilePath, err)
+			continue
+		}
+		fmt.Printf("  ✓ %s\n", filepath.Base(chunksList[i].FilePath))
 	}
 
 	// Build index
@@ -126,8 +168,7 @@ func main() {
 		results, _ := projectDB.SearchANN(vec, 3)
 		fmt.Printf("\n  \"%s\":\n", q)
 		for i, r := range results {
-			doc, _ := projectDB.GetDocument(r.DocID)
-			fmt.Printf("    %d. %s (%.4f)\n", i+1, filepath.Base(doc.Path), r.Distance)
+			fmt.Printf("    %d. %s (%.4f)\n", i+1, filepath.Base(r.FilePath), r.Distance)
 		}
 	}
 
@@ -145,8 +186,14 @@ func scanFolder(root string) ([]string, error) {
 	return files, err
 }
 
-func generateDocID(path string) string {
+func generateFileID(path string) string {
 	hash := md5.Sum([]byte(path))
+	return hex.EncodeToString(hash[:])
+}
+
+func generateChunkID(fileID string, chunkIndex int) string {
+	source := fmt.Sprintf("%s:chunk:%d", fileID, chunkIndex)
+	hash := md5.Sum([]byte(source))
 	return hex.EncodeToString(hash[:])
 }
 
