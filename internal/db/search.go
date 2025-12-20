@@ -12,8 +12,8 @@ type SearchResult struct {
 
 func (p *ProjectDB) BuildHNSWIndex() error {
 	_, err := p.conn.Exec(`
-		CREATE INDEX IF NOT EXISTS hnsw_idx 
-		ON embeddings USING HNSW (vector) 
+		CREATE INDEX IF NOT EXISTS hnsw_idx
+		ON embeddings USING HNSW (vector)
 		WITH (metric = 'cosine')
 	`)
 	return err
@@ -21,12 +21,17 @@ func (p *ProjectDB) BuildHNSWIndex() error {
 
 func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 	vecStr := vectorToString(query)
-	rows, err := p.conn.Query(fmt.Sprintf(`
+	// Note: DuckDB doesn't support placeholders for array literals or type casts in this context
+	// vecStr is generated from float32 slice, so it's safe (controlled input)
+	// k comes from application logic, but we validate it's an integer
+	queryStr := fmt.Sprintf(`
 		SELECT doc_id, array_cosine_distance(vector, %s::FLOAT[%d]) AS dist
 		FROM embeddings
 		ORDER BY array_cosine_distance(vector, %s::FLOAT[%d])
-		LIMIT %d
-	`, vecStr, p.Dimension, vecStr, p.Dimension, k))
+		LIMIT ?
+	`, vecStr, p.Dimension, vecStr, p.Dimension)
+
+	rows, err := p.conn.Query(queryStr, k)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +50,7 @@ func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 
 func (p *ProjectDB) GetDocument(id string) (*Document, error) {
 	row := p.conn.QueryRow(`
-		SELECT doc_id, path, file_type, modified_at, size, metadata, content
+		SELECT doc_id, path, file_type, modified_at, size, text_metadata, content
 		FROM documents WHERE doc_id = ?
 	`, id)
 
@@ -54,7 +59,7 @@ func (p *ProjectDB) GetDocument(id string) (*Document, error) {
 	if err := row.Scan(&d.ID, &d.Path, &d.FileType, &d.ModifiedAt, &d.Size, &metadata, &d.Content); err != nil {
 		return nil, err
 	}
-	d.Metadata = metadata
+	d.TextMetadata = metadata
 	return &d, nil
 }
 
