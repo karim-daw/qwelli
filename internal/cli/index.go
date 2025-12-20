@@ -13,17 +13,24 @@ import (
 )
 
 func NewIndexCmd() *cobra.Command {
-	return &cobra.Command{
+	var incremental bool
+
+	cmd := &cobra.Command{
 		Use:   "index <folder>",
 		Short: "Index a folder for semantic search",
 		Long:  "Recursively index all files in a folder and generate embeddings",
 		Args:  cobra.ExactArgs(1),
-		RunE:  runIndex,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIndex(args[0], incremental)
+		},
 	}
+
+	cmd.Flags().BoolVarP(&incremental, "incremental", "i", false, "Only index new or changed files")
+
+	return cmd
 }
 
-func runIndex(cmd *cobra.Command, args []string) error {
-	folderPath := args[0]
+func runIndex(folderPath string, incremental bool) error {
 
 	// Resolve to absolute path
 	absPath, err := filepath.Abs(folderPath)
@@ -53,9 +60,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📂 Indexing folder: %s\n", absPath)
 
-	// Check if the index exists
+	// Check if folder exists
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		return fmt.Errorf("index not found: %s", dbPath)
+		return fmt.Errorf("folder does not exist: %s", absPath)
 	}
 
 	fmt.Printf("💾 Database: %s\n\n", dbPath)
@@ -63,11 +70,34 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// Create engine
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
 
+	// If incremental, show status first
+	if incremental {
+		// Check if database exists
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			fmt.Println("⚠️  Database not found. Performing full index instead of incremental.")
+			incremental = false
+		} else {
+			status, err := eng.GetIndexStatus(dbPath, absPath)
+			if err != nil {
+				return fmt.Errorf("failed to get index status: %w", err)
+			}
+
+			if len(status.ToAdd) == 0 && len(status.ToUpdate) == 0 && len(status.ToDelete) == 0 {
+				fmt.Println("✓ Index is already up to date. No changes detected.")
+				return nil
+			}
+
+			// Show summary
+			fmt.Printf("📊 Detected changes: %d to add, %d to update, %d to delete\n\n",
+				len(status.ToAdd), len(status.ToUpdate), len(status.ToDelete))
+		}
+	}
+
 	// Index with progress
 	start := time.Now()
 	var lastProgress string
 
-	err = eng.IndexFolder(absPath, dbPath, func(current, total int, filename string) {
+	err = eng.IndexFolderIncremental(absPath, dbPath, incremental, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
 
 		// Clear previous line and print new progress
@@ -83,7 +113,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("indexing failed: %w", err)
 	}
 
-	fmt.Printf("✅ Indexing completed in %v\n", time.Since(start))
+	elapsed := time.Since(start)
+	fmt.Printf("✅ Total indexing time: %v (includes file processing, embedding generation, and HNSW index rebuild)\n", elapsed)
 	fmt.Printf("🔍 You can now search with: qwelli search \"your query\" --index %s\n", absPath)
 
 	return nil

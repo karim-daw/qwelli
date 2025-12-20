@@ -92,10 +92,24 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		case "index":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: index <folder>")
+				fmt.Println("❌ Usage: index <folder> [--incremental]")
 				continue
 			}
-			if err := runIndex(cmd, cmdArgs); err != nil {
+			// Check for incremental flag
+			incremental := false
+			for i, arg := range cmdArgs {
+				if arg == "--incremental" || arg == "-i" {
+					incremental = true
+					// Remove flag from args
+					cmdArgs = append(cmdArgs[:i], cmdArgs[i+1:]...)
+					break
+				}
+			}
+			if len(cmdArgs) == 0 {
+				fmt.Println("❌ Usage: index <folder> [--incremental]")
+				continue
+			}
+			if err := runIndex(cmdArgs[0], incremental); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			} else {
 				currentIndex = cmdArgs[0]

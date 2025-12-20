@@ -111,31 +111,34 @@ func (p *PDFChunker) buildMetadata(pdfMetadata *PDFMetadata, filePath string, pa
 		"indexed_at":   time.Now().Format(time.RFC3339),
 	}
 
-	// Only add title if it's not empty
-	if pdfMetadata.Title != "" {
-		metadata["title"] = pdfMetadata.Title
+	// Add optional metadata if available
+	if pdfMetadata != nil {
+		// Only add title if it's not empty
+		if pdfMetadata.Title != "" {
+			metadata["title"] = pdfMetadata.Title
+		}
+
+		// Add optional metadata
+		if pdfMetadata.PageCount > 0 {
+			metadata["page_count"] = pdfMetadata.PageCount
+		}
+
+		if pdfMetadata.Creator != "" {
+			metadata["creator"] = pdfMetadata.Creator
+		}
+
+		if !pdfMetadata.CreationDate.IsZero() {
+			metadata["creation_date"] = pdfMetadata.CreationDate.Format(time.RFC3339)
+		}
+
+		if !pdfMetadata.ModDate.IsZero() {
+			metadata["modified_date"] = pdfMetadata.ModDate.Format(time.RFC3339)
+		}
 	}
 
 	// Add page numbers
 	if len(pageNumbers) > 0 {
 		metadata["page_numbers"] = pageNumbers
-	}
-
-	// Add optional metadata
-	if pdfMetadata.PageCount > 0 {
-		metadata["page_count"] = pdfMetadata.PageCount
-	}
-
-	if pdfMetadata.Creator != "" {
-		metadata["creator"] = pdfMetadata.Creator
-	}
-
-	if !pdfMetadata.CreationDate.IsZero() {
-		metadata["creation_date"] = pdfMetadata.CreationDate.Format(time.RFC3339)
-	}
-
-	if !pdfMetadata.ModDate.IsZero() {
-		metadata["modified_date"] = pdfMetadata.ModDate.Format(time.RFC3339)
 	}
 
 	return metadata
