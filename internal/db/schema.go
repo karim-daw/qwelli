@@ -10,8 +10,10 @@ func buildSchema(dimension int) []string {
 			file_type TEXT,
 			modified_at TIMESTAMP,
 			size BIGINT,
-			metadata JSON,
-			content TEXT
+			text_metadata JSON,
+			content TEXT,
+			content_type TEXT,
+			image_metadata JSON
 		)`,
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS embeddings (
 			doc_id TEXT PRIMARY KEY REFERENCES documents(doc_id),
