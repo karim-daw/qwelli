@@ -112,16 +112,57 @@ func runStatus(indexPath string) error {
 
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
 
+	// Get index status with pending changes
+	status, err := eng.GetIndexStatus(dbPath, absPath)
+	if err != nil {
+		return fmt.Errorf("failed to get index status: %w", err)
+	}
+
 	count, err := eng.GetIndexStats(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to get stats: %w", err)
 	}
 
 	fmt.Printf("📊 Index Status: %s\n\n", absPath)
-	fmt.Printf("📄 Indexed documents: %d\n", count)
+	fmt.Printf("📄 Indexed chunks: %d\n", count)
+	fmt.Printf("📁 Total files: %d\n", status.Total)
+	fmt.Printf("✅ Up to date: %d\n", status.UpToDate)
 	fmt.Printf("💾 Database: %s\n", dbPath)
 	fmt.Printf("💽 Database size: %.2f MB\n", float64(info.Size())/(1024*1024))
-	fmt.Printf("🕐 Last indexed: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
+	fmt.Printf("🕐 Last indexed: %s\n\n", info.ModTime().Format("2006-01-02 15:04:05"))
+
+	// Show pending changes (git-style)
+	if len(status.ToAdd) > 0 {
+		fmt.Printf("Files to add (%d):\n", len(status.ToAdd))
+		for _, f := range status.ToAdd {
+			fmt.Printf("  + %s (%s, %d bytes)\n", filepath.Base(f.Path), f.FileType, f.Size)
+		}
+		fmt.Println()
+	}
+
+	if len(status.ToUpdate) > 0 {
+		fmt.Printf("Files to update (%d):\n", len(status.ToUpdate))
+		for _, f := range status.ToUpdate {
+			fmt.Printf("  ~ %s (%s, %d bytes)\n", filepath.Base(f.Path), f.FileType, f.Size)
+		}
+		fmt.Println()
+	}
+
+	if len(status.ToDelete) > 0 {
+		fmt.Printf("Files to delete (%d):\n", len(status.ToDelete))
+		for _, f := range status.ToDelete {
+			fmt.Printf("  - %s (%s)\n", filepath.Base(f.Path), f.FileType)
+		}
+		fmt.Println()
+	}
+
+	if len(status.ToAdd) == 0 && len(status.ToUpdate) == 0 && len(status.ToDelete) == 0 {
+		fmt.Println("✓ Index is up to date. No changes detected.")
+	} else {
+		fmt.Printf("Summary: %d to add, %d to update, %d to delete\n",
+			len(status.ToAdd), len(status.ToUpdate), len(status.ToDelete))
+		fmt.Printf("Run 'qwelli index --incremental %s' to apply changes\n", absPath)
+	}
 
 	return nil
 }
