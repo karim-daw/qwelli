@@ -51,9 +51,9 @@ func TestDetectChanges(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := DetectChanges(pdb, tmpDir)
+	changes, err := detectChanges(pdb, tmpDir)
 	if err != nil {
-		t.Fatalf("DetectChanges() error = %v", err)
+		t.Fatalf("detectChanges() error = %v", err)
 	}
 
 	// file2 should be in ToAdd
@@ -110,7 +110,7 @@ func TestDetectChanges_ModifiedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := DetectChanges(pdb, tmpDir)
+	changes, err := detectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
@@ -162,7 +162,7 @@ func TestDetectChanges_DeletedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := DetectChanges(pdb, tmpDir)
+	changes, err := detectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
