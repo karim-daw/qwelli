@@ -21,11 +21,12 @@ func buildSchema(dimension int) []string {
 			chunk_index INT NOT NULL,
 			total_chunks INT NOT NULL,
 			content TEXT NOT NULL,
-			start_token INT,
-			end_token INT,
-			page_numbers INT[]
+			page_numbers INT[],
+			content_type TEXT DEFAULT 'text',
+			image_data BLOB
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunks_content_type ON chunks(content_type)`,
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS embeddings (
 			chunk_id TEXT PRIMARY KEY,
 			vector FLOAT[%d]
@@ -35,5 +36,6 @@ func buildSchema(dimension int) []string {
 			value TEXT
 		)`,
 		fmt.Sprintf(`INSERT OR REPLACE INTO metadata (key, value) VALUES ('dimension', '%d')`, dimension),
+		`INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '2')`,
 	}
 }
