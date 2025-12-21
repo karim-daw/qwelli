@@ -25,14 +25,14 @@ func main() {
 	dbPath := "demo.db"
 	modelName := os.Getenv("QWELLI_EMBEDDING_MODEL") // text-embedding-3-small
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
-	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") // https://api.openai.com/v1/embeddings
+	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") // https://api.voyageai.com/v1/multimodalembeddings
 
 	// Clean up existing database
 	os.Remove(dbPath)
 
 	// Initialize embedder
 	fmt.Println("🤖 Initializing embedder...")
-	embedder, err := indexer.NewEmbedder(apiKey, modelName, endpoint)
+	embedder, err := indexer.NewEmbedder("voyage", apiKey, modelName, endpoint)
 	if err != nil {
 		log.Fatalf("Failed to initialize embedder: %v", err)
 	}
