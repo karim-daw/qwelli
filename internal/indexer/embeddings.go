@@ -4,24 +4,19 @@ import (
 	"fmt"
 )
 
-// EmbeddingProvider is the interface that all embedding providers must implement
-type EmbeddingProvider interface {
-	Embed(text string) ([]float32, error)
-	EmbedBatch(texts []string) ([][]float32, error)
-}
-
 // Embedder wraps an EmbeddingProvider
 type Embedder struct {
 	provider EmbeddingProvider
 }
 
-// NewEmbedder creates an embedder with explicit configuration
-// Uses HTTP-based provider compatible with OpenAI, VoyageAI, and other APIs
-func NewEmbedder(apiKey, model, endpoint string) (*Embedder, error) {
-	provider, err := NewHTTPEmbeddingProvider(apiKey, model, endpoint)
+// NewEmbedder creates an embedder with Voyage AI provider
+func NewEmbedder(providerType, apiKey, model, endpoint string) (*Embedder, error) {
+	// Always use Voyage provider
+	provider, err := NewVoyageEmbeddingProvider(apiKey, model, endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize embedding provider: %w", err)
+		return nil, fmt.Errorf("failed to initialize Voyage provider: %w", err)
 	}
+
 	return &Embedder{provider: provider}, nil
 }
 
@@ -33,4 +28,36 @@ func (e *Embedder) Embed(text string) ([]float32, error) {
 // EmbedBatch generates embeddings for multiple texts
 func (e *Embedder) EmbedBatch(texts []string) ([][]float32, error) {
 	return e.provider.EmbedBatch(texts)
+}
+
+// IsMultimodal returns true if the provider supports multimodal embeddings
+func (e *Embedder) IsMultimodal() bool {
+	_, ok := e.provider.(MultimodalEmbeddingProvider)
+	return ok
+}
+
+// GetMultimodalProvider returns the provider as MultimodalEmbeddingProvider if supported
+func (e *Embedder) GetMultimodalProvider() (MultimodalEmbeddingProvider, bool) {
+	provider, ok := e.provider.(MultimodalEmbeddingProvider)
+	return provider, ok
+}
+
+// EmbedImage generates an embedding for a single image (base64-encoded)
+// Returns an error if the provider doesn't support multimodal embeddings
+func (e *Embedder) EmbedImage(imageBase64 string) ([]float32, error) {
+	multimodalProvider, ok := e.provider.(MultimodalEmbeddingProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider does not support image embeddings")
+	}
+	return multimodalProvider.EmbedImage(imageBase64)
+}
+
+// EmbedMultimodal generates embeddings for mixed text and image inputs
+// Returns an error if the provider doesn't support multimodal embeddings
+func (e *Embedder) EmbedMultimodal(inputs []MultimodalInput) ([][]float32, error) {
+	multimodalProvider, ok := e.provider.(MultimodalEmbeddingProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider does not support multimodal embeddings")
+	}
+	return multimodalProvider.EmbedMultimodal(inputs)
 }
