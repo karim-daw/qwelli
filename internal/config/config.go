@@ -23,10 +23,12 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
+
 	return &Config{
 		EmbeddingProvider: "voyagerAI",
-		Model:             "voyage-3-large",
-		Endpoint:          "https://api.voyageai.com/v1/embeddings",
+		APIKey:            os.Getenv("QWELLI_EMBEDDING_KEY"),
+		Model:             os.Getenv("QWELLI_EMBEDDING_MODEL"),
+		Endpoint:          os.Getenv("QWELLI_EMBEDDING_ENDPOINT"),
 		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
