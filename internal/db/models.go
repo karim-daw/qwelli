@@ -16,7 +16,6 @@ type Chunk struct {
 	ChunkID string
 	FileID  string
 
-	// DENORMALIZED: Hot path fields for fast search results
 	FilePath string // Duplicated from File.Path
 	FileType string // Duplicated from File.FileType
 
