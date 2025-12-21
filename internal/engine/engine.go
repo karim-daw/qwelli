@@ -1,9 +1,14 @@
 package engine
 
 import (
+	"bytes"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io/fs"
 	"log"
 	"os"
@@ -17,13 +22,31 @@ import (
 )
 
 type Engine struct {
-	apiKey   string
-	model    string
-	endpoint string
+	apiKey           string
+	model            string
+	endpoint         string
+	providerType     string
+	enableMultimodal bool
 }
 
 func NewEngine(apiKey, model, endpoint string) *Engine {
-	return &Engine{apiKey: apiKey, model: model, endpoint: endpoint}
+	return &Engine{
+		apiKey:           apiKey,
+		model:            model,
+		endpoint:         endpoint,
+		providerType:     "voyage",
+		enableMultimodal: true, // Default to true for Voyage
+	}
+}
+
+func NewEngineWithProvider(apiKey, model, endpoint, providerType string, enableMultimodal bool) *Engine {
+	return &Engine{
+		apiKey:           apiKey,
+		model:            model,
+		endpoint:         endpoint,
+		providerType:     providerType,
+		enableMultimodal: enableMultimodal,
+	}
 }
 
 type SearchResult struct {
@@ -47,7 +70,7 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(cu
 
 func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string)) error {
 	// Detect dimension
-	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
+	embedder, err := indexer.NewEmbedder(e.providerType, e.apiKey, e.model, e.endpoint)
 	if err != nil {
 		return err
 	}
@@ -142,7 +165,6 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 
 	// Process files
 	var allChunks []db.Chunk
-	var allContents []string
 
 	for i, f := range filesToProcess {
 		if progressCallback != nil {
@@ -187,10 +209,13 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 
 		// Process file and create chunks
 		var chunks []db.Chunk
-		var contents []string
 
 		if strings.ToLower(filepath.Ext(absPath)) == ".pdf" {
-			chunks, contents, err = processPDFFileNew(file)
+			if e.enableMultimodal && embedder.IsMultimodal() {
+				chunks, _, err = processPDFFileMultimodal(file)
+			} else {
+				chunks, _, err = processPDFFileNew(file)
+			}
 			if err != nil {
 				log.Printf("⚠️  Failed to process PDF %s: %v", filepath.Base(absPath), err)
 				continue
@@ -208,7 +233,7 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 				continue
 			}
 
-			chunks, contents, err = processTextFileNew(file, string(content))
+			chunks, _, err = processTextFileNew(file, string(content))
 			if err != nil {
 				log.Printf("⚠️  Failed to process text file %s: %v", absPath, err)
 				continue
@@ -216,30 +241,360 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 		}
 
 		allChunks = append(allChunks, chunks...)
-		allContents = append(allContents, contents...)
 	}
 
 	// Generate embeddings for all chunks
-	if len(allContents) > 0 {
-		embeddings, err := embedder.EmbedBatch(allContents)
-		if err != nil {
-			return fmt.Errorf("failed to generate embeddings: %w", err)
+	if len(allChunks) > 0 {
+		var embeddings [][]float32
+		var err error
+
+		// Check if we have multimodal chunks (images)
+		hasImages := false
+		for _, chunk := range allChunks {
+			if chunk.ContentType == "image" {
+				hasImages = true
+				break
+			}
 		}
 
-		// Insert chunks and embeddings
-		for i, chunk := range allChunks {
-			if err := projectDB.InsertChunk(chunk); err != nil {
-				log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
-				continue
+		if hasImages && embedder.IsMultimodal() {
+			// Use multimodal embedding
+			multimodalInputs := make([]indexer.MultimodalInput, 0, len(allChunks))
+			validChunkIndices := make([]int, 0, len(allChunks))
+
+			// Statistics for image validation
+			imageSkipStats := struct {
+				emptyBase64      int
+				invalidBase64    int
+				emptyDecoded     int
+				tooSmallBytes    int
+				tooLargeBytes    int
+				invalidFormat    int
+				decodeFailed     int
+				tooSmallDims     int
+				tooLargeDims     int
+				badAspectRatio   int
+				exceedsVoyageMax int
+				reencodeFailed   int
+				accepted         int
+			}{}
+
+			for i, chunk := range allChunks {
+				if chunk.ContentType == "image" {
+					// Image chunk - ImageData contains base64 string as bytes
+					imageBase64 := string(chunk.ImageData)
+
+					// Validate base64 - skip if empty or invalid
+					if imageBase64 == "" || len(imageBase64) < 10 {
+						imageSkipStats.emptyBase64++
+						continue
+					}
+
+					// Remove any whitespace/newlines that might have been introduced
+					imageBase64 = strings.TrimSpace(imageBase64)
+					imageBase64 = strings.ReplaceAll(imageBase64, "\n", "")
+					imageBase64 = strings.ReplaceAll(imageBase64, "\r", "")
+
+					// Remove data URI prefix if present (e.g., "data:image/png;base64,")
+					if strings.HasPrefix(imageBase64, "data:") {
+						// Find the comma after the base64 declaration
+						commaIdx := strings.Index(imageBase64, ",")
+						if commaIdx > 0 && commaIdx < len(imageBase64)-1 {
+							imageBase64 = imageBase64[commaIdx+1:]
+						}
+					}
+
+					// Validate base64 by attempting to decode it
+					decoded, err := base64.StdEncoding.DecodeString(imageBase64)
+					if err != nil {
+						imageSkipStats.invalidBase64++
+						continue
+					}
+
+					// Additional validation: decoded data should be reasonable size
+					if len(decoded) == 0 {
+						imageSkipStats.emptyDecoded++
+						continue
+					}
+
+					// Skip images that are too small (likely corrupted or placeholder)
+					// Minimum reasonable image size is ~100 bytes decoded (about 133 bytes base64)
+					minImageSize := 100
+					if len(decoded) < minImageSize {
+						imageSkipStats.tooSmallBytes++
+						continue
+					}
+
+					// Voyage API has size limits - check if image is too large
+					// Typical limit is around 20MB for base64, which is ~15MB decoded
+					// Let's be conservative and limit to 10MB decoded (about 13.3MB base64)
+					maxImageSize := 10 * 1024 * 1024 // 10MB
+					if len(decoded) > maxImageSize {
+						imageSkipStats.tooLargeBytes++
+						continue
+					}
+
+					// Check if it's a valid image format (basic check - should start with image magic bytes)
+					// JPEG: FF D8 FF, PNG: 89 50 4E 47, GIF: 47 49 46 38
+					if len(decoded) < 4 {
+						imageSkipStats.tooSmallBytes++
+						continue
+					}
+
+					isValidImage := (decoded[0] == 0xFF && decoded[1] == 0xD8 && decoded[2] == 0xFF) || // JPEG
+						(decoded[0] == 0x89 && decoded[1] == 0x50 && decoded[2] == 0x4E && decoded[3] == 0x47) || // PNG
+						(decoded[0] == 0x47 && decoded[1] == 0x49 && decoded[2] == 0x46 && decoded[3] == 0x38) // GIF
+
+					if !isValidImage {
+						imageSkipStats.invalidFormat++
+						continue
+					}
+
+					// Additional check: try to decode and verify image can be parsed
+					// This catches issues that basic validation might miss
+					img, format, err := image.Decode(bytes.NewReader(decoded))
+					if err != nil {
+						imageSkipStats.decodeFailed++
+						continue
+					}
+
+					// Get image dimensions
+					bounds := img.Bounds()
+					width := bounds.Dx()
+					height := bounds.Dy()
+					pixelCount := width * height
+
+					// Skip images that are too small
+					// Minimum: ~1/3 of A4 page size
+					// A4 at 150 DPI: ~1240x1754 pixels
+					// 1/3 of A4: ~700x500 pixels = ~350,000 pixels
+					// We'll use 500x350 pixels (175,000 pixels) as minimum to ensure meaningful content
+					minWidth := 500
+					minHeight := 350
+					minPixels := 175_000 // ~1/3 of A4 page at reasonable resolution
+					if width < minWidth || height < minHeight || pixelCount < minPixels {
+						imageSkipStats.tooSmallDims++
+						continue
+					}
+
+					// Skip images that are too large (max dimensions and pixel count)
+					// Maximum: 4000x3000 pixels (12M pixels) - reasonable upper limit for search
+					// Voyage API limit is 16M pixels, but we'll be more conservative
+					maxWidth := 4000
+					maxHeight := 3000
+					maxPixels := 12_000_000 // 12 million pixels
+					if width > maxWidth || height > maxHeight || pixelCount > maxPixels {
+						imageSkipStats.tooLargeDims++
+						continue
+					}
+
+					// Check aspect ratio (Voyage API has limits on aspect ratio)
+					// Aspect ratio = width / height
+					// Common limits are typically between 0.1 and 10.0
+					aspectRatio := float64(width) / float64(height)
+					minAspectRatio := 0.1  // Very tall images (1:10)
+					maxAspectRatio := 10.0 // Very wide images (10:1)
+					if aspectRatio < minAspectRatio || aspectRatio > maxAspectRatio {
+						imageSkipStats.badAspectRatio++
+						continue
+					}
+
+					// Note: We already check max dimensions above (12M pixels)
+					// This check is redundant but kept for Voyage API compliance (16M pixels is their absolute limit)
+					voyageMaxPixels := 16_000_000
+					if pixelCount > voyageMaxPixels {
+						imageSkipStats.exceedsVoyageMax++
+						continue
+					}
+
+					// Check file size (Voyage limit is 20MB, we already check 10MB above, but double-check)
+					maxImageSizeBytes := 20 * 1024 * 1024 // 20MB
+					if len(decoded) > maxImageSizeBytes {
+						imageSkipStats.tooLargeBytes++
+						continue
+					}
+
+					// Re-encode base64 to ensure it's clean and properly formatted
+					// This helps catch any encoding issues
+					cleanBase64 := base64.StdEncoding.EncodeToString(decoded)
+
+					// Verify the re-encoded base64 can be decoded back
+					testDecoded, err := base64.StdEncoding.DecodeString(cleanBase64)
+					if err != nil || len(testDecoded) != len(decoded) {
+						imageSkipStats.reencodeFailed++
+						continue
+					}
+
+					// Image passed all validation
+					imageSkipStats.accepted++
+
+					// Normalize format name (image.Decode returns "jpeg" but we need lowercase)
+					formatLower := strings.ToLower(format)
+
+					multimodalInputs = append(multimodalInputs, indexer.MultimodalInput{
+						Type:        "image",
+						ImageBase64: cleanBase64, // Use re-encoded clean base64 (without data URI prefix)
+						ImageFormat: formatLower, // Format: "jpeg", "png", "gif", etc.
+						ImagePixels: pixelCount,  // Pixel count for token calculation (560 pixels = 1 token)
+					})
+					validChunkIndices = append(validChunkIndices, i)
+				} else {
+					// Text chunk - skip if empty
+					if chunk.Content == "" {
+						log.Printf("⚠️  Skipping text chunk %d: empty content", i)
+						continue
+					}
+
+					multimodalInputs = append(multimodalInputs, indexer.MultimodalInput{
+						Type: "text",
+						Text: chunk.Content,
+					})
+					validChunkIndices = append(validChunkIndices, i)
+				}
 			}
 
-			if i < len(embeddings) {
-				if err := projectDB.InsertEmbedding(db.Embedding{
-					ChunkID: chunk.ChunkID,
-					Vector:  embeddings[i],
-				}); err != nil {
-					log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunk.ChunkID, err)
+			// Log summary of image validation
+			totalSkipped := imageSkipStats.emptyBase64 + imageSkipStats.invalidBase64 + imageSkipStats.emptyDecoded +
+				imageSkipStats.tooSmallBytes + imageSkipStats.tooLargeBytes + imageSkipStats.invalidFormat +
+				imageSkipStats.decodeFailed + imageSkipStats.tooSmallDims + imageSkipStats.tooLargeDims +
+				imageSkipStats.badAspectRatio + imageSkipStats.exceedsVoyageMax + imageSkipStats.reencodeFailed
+			if totalSkipped > 0 || imageSkipStats.accepted > 0 {
+				skipReasons := []string{}
+				if imageSkipStats.emptyBase64 > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d empty", imageSkipStats.emptyBase64))
+				}
+				if imageSkipStats.invalidBase64 > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d invalid base64", imageSkipStats.invalidBase64))
+				}
+				if imageSkipStats.tooSmallDims > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d too small", imageSkipStats.tooSmallDims))
+				}
+				if imageSkipStats.tooLargeDims > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d too large", imageSkipStats.tooLargeDims))
+				}
+				if imageSkipStats.badAspectRatio > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d bad aspect ratio", imageSkipStats.badAspectRatio))
+				}
+				if imageSkipStats.decodeFailed > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d decode failed", imageSkipStats.decodeFailed))
+				}
+				if imageSkipStats.invalidFormat > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d invalid format", imageSkipStats.invalidFormat))
+				}
+				if imageSkipStats.tooLargeBytes > 0 {
+					skipReasons = append(skipReasons, fmt.Sprintf("%d too large (bytes)", imageSkipStats.tooLargeBytes))
+				}
+				if len(skipReasons) > 0 {
+					log.Printf("📊 Image validation: %d accepted, %d skipped (%s)", imageSkipStats.accepted, totalSkipped, strings.Join(skipReasons, ", "))
+				} else {
+					log.Printf("📊 Image validation: %d accepted", imageSkipStats.accepted)
+				}
+			}
+
+			if len(multimodalInputs) == 0 {
+				return fmt.Errorf("no valid chunks to embed")
+			}
+
+			// Log batch composition for debugging
+			imageCount := 0
+			textCount := 0
+			for _, inp := range multimodalInputs {
+				if inp.Type == "image" {
+					imageCount++
+				} else {
+					textCount++
+				}
+			}
+			log.Printf("  Batch contains %d text inputs and %d image inputs", textCount, imageCount)
+
+			embeddings, err = embedder.EmbedMultimodal(multimodalInputs)
+			if err != nil {
+				return fmt.Errorf("failed to generate embeddings: %w", err)
+			}
+
+			// Map embeddings back to valid chunks
+			if len(embeddings) != len(validChunkIndices) {
+				return fmt.Errorf("embedding count mismatch: got %d embeddings for %d valid chunks", len(embeddings), len(validChunkIndices))
+			}
+
+			// Create a map of chunk index to embedding
+			embeddingMap := make(map[int][]float32)
+			for j, idx := range validChunkIndices {
+				if j < len(embeddings) {
+					embeddingMap[idx] = embeddings[j]
+				}
+			}
+
+			// Insert chunks and embeddings
+			for i, chunk := range allChunks {
+				if err := projectDB.InsertChunk(chunk); err != nil {
+					log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
 					continue
+				}
+
+				// Only insert embedding if this chunk was successfully embedded
+				if emb, ok := embeddingMap[i]; ok {
+					if err := projectDB.InsertEmbedding(db.Embedding{
+						ChunkID: chunk.ChunkID,
+						Vector:  emb,
+					}); err != nil {
+						log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunk.ChunkID, err)
+						continue
+					}
+				}
+			}
+		} else {
+			// Use text-only embedding
+			texts := make([]string, 0, len(allChunks))
+			validChunkIndices := make([]int, 0, len(allChunks))
+
+			for i, chunk := range allChunks {
+				if chunk.Content == "" {
+					log.Printf("⚠️  Skipping text chunk %d: empty content", i)
+					continue
+				}
+				texts = append(texts, chunk.Content)
+				validChunkIndices = append(validChunkIndices, i)
+			}
+
+			if len(texts) == 0 {
+				return fmt.Errorf("no valid chunks to embed")
+			}
+
+			embeddings, err = embedder.EmbedBatch(texts)
+			if err != nil {
+				return fmt.Errorf("failed to generate embeddings: %w", err)
+			}
+
+			// Map embeddings back to valid chunks
+			if len(embeddings) != len(validChunkIndices) {
+				return fmt.Errorf("embedding count mismatch: got %d embeddings for %d valid chunks", len(embeddings), len(validChunkIndices))
+			}
+
+			// Create a map of chunk index to embedding
+			embeddingMap := make(map[int][]float32)
+			for j, idx := range validChunkIndices {
+				if j < len(embeddings) {
+					embeddingMap[idx] = embeddings[j]
+				}
+			}
+
+			// Insert chunks and embeddings
+			for i, chunk := range allChunks {
+				if err := projectDB.InsertChunk(chunk); err != nil {
+					log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
+					continue
+				}
+
+				// Only insert embedding if this chunk was successfully embedded
+				if emb, ok := embeddingMap[i]; ok {
+					if err := projectDB.InsertEmbedding(db.Embedding{
+						ChunkID: chunk.ChunkID,
+						Vector:  emb,
+					}); err != nil {
+						log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunk.ChunkID, err)
+						continue
+					}
 				}
 			}
 		}
@@ -259,7 +614,11 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 }
 
 func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, error) {
-	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
+	return e.SearchWithFilter(query, dbPath, topK, "")
+}
+
+func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, contentType string) ([]SearchResult, error) {
+	embedder, err := indexer.NewEmbedder(e.providerType, e.apiKey, e.model, e.endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +634,12 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 	}
 	defer projectDB.Close()
 
-	results, err := projectDB.SearchANN(queryVec, topK)
+	var results []db.SearchResult
+	if contentType != "" {
+		results, err = projectDB.SearchANNWithFilter(queryVec, topK, contentType)
+	} else {
+		results, err = projectDB.SearchANN(queryVec, topK)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +653,11 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 		metadata["total_chunks"] = r.TotalChunks
 		if len(r.PageNumbers) > 0 {
 			metadata["page_numbers"] = r.PageNumbers
+		}
+
+		metadata["content_type"] = r.ContentType
+		if r.ContentType == "image" && len(r.ImageData) > 0 {
+			metadata["has_image"] = true
 		}
 
 		out = append(out, SearchResult{
@@ -496,6 +865,66 @@ func getFileType(path string) string {
 		return "unknown"
 	}
 	return ext[1:]
+}
+
+// processPDFFileMultimodal processes a PDF file with multimodal support (text + images)
+func processPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
+	// Extract PDF text and metadata
+	pdfProc := processor.NewPDFProcessor()
+	pages, metadata, err := pdfProc.ExtractText(file.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
+	}
+
+	// Extract images
+	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	images, err := imageExtractor.ExtractImages(file.Path)
+	if err != nil {
+		log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)", filepath.Base(file.Path), err)
+		images = []processor.PDFImage{}
+	}
+
+	// Create multimodal chunker
+	pdfChunker := processor.NewPDFChunker(processor.ChunkerConfig{
+		ChunkSize:   300,
+		OverlapSize: 10,
+	})
+	multimodalChunker := processor.NewMultimodalChunker(pdfChunker, imageExtractor)
+
+	// Chunk PDF with multimodal support
+	multimodalChunks, err := multimodalChunker.ChunkPDF(pages, images, metadata, file.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
+	}
+
+	// Convert to db.Chunk format
+	var dbChunks []db.Chunk
+	var contents []string
+
+	for i, mc := range multimodalChunks {
+		pageNumbers := []int{mc.PageNumber}
+
+		dbChunk := db.Chunk{
+			ChunkID:     generateChunkID(file.FileID, i),
+			FileID:      file.FileID,
+			FilePath:    file.Path,
+			FileType:    file.FileType,
+			ChunkIndex:  i,
+			TotalChunks: len(multimodalChunks),
+			Content:     mc.Content,
+			PageNumbers: pageNumbers,
+			ContentType: mc.ContentType,
+			ImageData:   mc.ImageData, // Already base64 string as bytes
+		}
+
+		dbChunks = append(dbChunks, dbChunk)
+
+		// For embedding, use text content for text chunks
+		// Images will be handled separately in the embedding generation
+		contents = append(contents, mc.Content)
+	}
+
+	return dbChunks, contents, nil
 }
 
 // processPDFFileNew processes a PDF file and returns chunks using the new schema
