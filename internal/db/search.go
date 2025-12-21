@@ -61,7 +61,35 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 }
 
 func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
+	return p.SearchANNWithFilter(query, k, "")
+}
+
+// SearchANNWithFilter performs ANN search with optional content type filtering
+// contentType can be "text", "image", or "" (empty string) for all types
+func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType string) ([]SearchResult, error) {
 	vecStr := vectorToString(query)
+
+	// Build WHERE clause for content type filtering
+	contentTypeFilter := ""
+	if contentType != "" {
+		contentTypeFilter = fmt.Sprintf(" AND c.content_type = '%s'", contentType)
+	}
+
+	// When filtering by content type, fetch more candidates to ensure we get enough results
+	// after filtering. Use a multiplier to account for the distribution of content types.
+	candidateLimit := k
+	if contentType != "" {
+		// Fetch 3x more candidates when filtering to ensure we get enough results
+		// This is a heuristic - in practice, the distribution might vary
+		candidateLimit = k * 3
+		if candidateLimit < 50 {
+			candidateLimit = 50 // Minimum candidates to fetch
+		}
+		if candidateLimit > 1000 {
+			candidateLimit = 1000 // Maximum candidates to avoid performance issues
+		}
+	}
+
 	// Optimized CTE query: avoid double distance calculation
 	// Join with chunks table to get denormalized fields (no second JOIN needed)
 	queryStr := fmt.Sprintf(`
@@ -81,13 +109,17 @@ func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 			c.chunk_index,
 			c.total_chunks,
 			c.page_numbers,
+			c.content_type,
+			c.image_data,
 			r.distance
 		FROM ranked_embeddings r
 		JOIN chunks c ON r.chunk_id = c.chunk_id
+		WHERE 1=1%s
 		ORDER BY r.distance
-	`, vecStr, p.Dimension)
+		LIMIT ?
+	`, vecStr, p.Dimension, contentTypeFilter)
 
-	rows, err := p.conn.Query(queryStr, k)
+	rows, err := p.conn.Query(queryStr, candidateLimit, k)
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +129,20 @@ func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 	for rows.Next() {
 		var r SearchResult
 		var pageNumbersIface interface{} // DuckDB returns arrays as []interface{}
+		var imageData []byte
+		var contentTypeStr string
+
 		if err := rows.Scan(&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
-			&r.ChunkIndex, &r.TotalChunks, &pageNumbersIface, &r.Distance); err != nil {
+			&r.ChunkIndex, &r.TotalChunks, &pageNumbersIface, &contentTypeStr, &imageData, &r.Distance); err != nil {
 			return nil, err
 		}
 		// Parse page_numbers array
 		r.PageNumbers = parsePageNumbers(pageNumbersIface)
+		r.ContentType = contentTypeStr
+		if r.ContentType == "" {
+			r.ContentType = "text"
+		}
+		r.ImageData = imageData
 		results = append(results, r)
 	}
 	return results, nil
