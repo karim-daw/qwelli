@@ -14,6 +14,8 @@ import (
 func NewSearchCmd() *cobra.Command {
 	var indexPath string
 	var topK int
+	var textOnly bool
+	var imagesOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -21,19 +23,30 @@ func NewSearchCmd() *cobra.Command {
 		Long:  "Perform semantic search across indexed files",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query := strings.Join(args, " ")
-			return runSearch(query, indexPath, topK)
+			// Clean query: remove any flag-like strings that might have been included
+			queryParts := []string{}
+			for _, arg := range args {
+				// Skip flag-like strings (they should have been parsed by Cobra already)
+				if strings.HasPrefix(arg, "--") {
+					continue
+				}
+				queryParts = append(queryParts, arg)
+			}
+			query := strings.Join(queryParts, " ")
+			return runSearch(query, indexPath, topK, textOnly, imagesOnly)
 		},
 	}
 
 	cmd.Flags().StringVarP(&indexPath, "index", "i", "", "Path to indexed folder (required)")
 	cmd.Flags().IntVarP(&topK, "top", "t", 5, "Number of results to return")
+	cmd.Flags().BoolVar(&textOnly, "text-only", false, "Search only text chunks")
+	cmd.Flags().BoolVar(&imagesOnly, "images-only", false, "Search only image chunks")
 	cmd.MarkFlagRequired("index")
 
 	return cmd
 }
 
-func runSearch(query, indexPath string, topK int) error {
+func runSearch(query, indexPath string, topK int, textOnly, imagesOnly bool) error {
 	absPath, err := filepath.Abs(indexPath)
 	if err != nil {
 		return fmt.Errorf("invalid index path: %w", err)
@@ -46,16 +59,36 @@ func runSearch(query, indexPath string, topK int) error {
 
 	dbPath := filepath.Join(cfg.IndexDir, generateDBName(absPath))
 
-	fmt.Printf("🔍 Searching for: %s\n\n", query)
+	// Determine content type filter
+	contentType := ""
+	if textOnly && imagesOnly {
+		return fmt.Errorf("cannot use both --text-only and --images-only")
+	} else if textOnly {
+		contentType = "text"
+	} else if imagesOnly {
+		contentType = "image"
+	}
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	fmt.Printf("🔍 Searching for: %s", query)
+	if contentType != "" {
+		fmt.Printf(" (filter: %s only)", contentType)
+	}
+	fmt.Printf("\n\n")
+
+	// Use Voyage provider
+	eng := engine.NewEngineWithProvider(cfg.APIKey, cfg.Model, cfg.Endpoint, "voyage", false)
 
 	// check if the index exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return fmt.Errorf("index not found: %s", dbPath)
 	}
 
-	results, err := eng.Search(query, dbPath, topK)
+	var results []engine.SearchResult
+	if contentType != "" {
+		results, err = eng.SearchWithFilter(query, dbPath, topK, contentType)
+	} else {
+		results, err = eng.Search(query, dbPath, topK)
+	}
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
@@ -67,6 +100,18 @@ func runSearch(query, indexPath string, topK int) error {
 
 	for i, result := range results {
 		fmt.Printf("Result %d:\n", i+1)
+
+		// Display content type
+		contentType := "text"
+		if ct, ok := result.TextMetadata["content_type"].(string); ok && ct != "" {
+			contentType = ct
+		}
+		if contentType == "image" {
+			fmt.Printf("  🖼️  Type: Image\n")
+		} else {
+			fmt.Printf("  📄 Type: Text\n")
+		}
+
 		fmt.Printf("  📄 File: %s\n", result.FileName)
 
 		// Display page numbers if available (PDFs)
@@ -110,7 +155,17 @@ func runSearch(query, indexPath string, topK int) error {
 
 		fmt.Printf("  📁 Path: %s\n", result.FilePath)
 		fmt.Printf("  📏 Distance: %.4f\n", result.Distance)
-		fmt.Printf("  📝 Preview: %s\n", truncate(result.Content, 500))
+
+		// For images, try to save preview
+		if contentType == "image" {
+			if hasImage, ok := result.TextMetadata["has_image"].(bool); ok && hasImage {
+				// Note: ImageData would need to be passed through SearchResult
+				// For now, just indicate it's an image
+				fmt.Printf("  🖼️  Image content (base64 data available)\n")
+			}
+		} else {
+			fmt.Printf("  📝 Preview: %s\n", truncate(result.Content, 500))
+		}
 		fmt.Println()
 	}
 
