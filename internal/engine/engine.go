@@ -71,13 +71,14 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 		}
 	}
 
+	// Open project database
 	projectDB, err := db.OpenProjectDB(dbPath, dimension)
 	if err != nil {
 		return err
 	}
 	defer projectDB.Close()
 
-	// Store metadata
+	// Store project metadata
 	projectDB.SetMetadata("dimension", fmt.Sprintf("%d", dimension))
 	projectDB.SetMetadata("model", e.model)
 	projectDB.SetMetadata("folder_path", folderPath)
@@ -86,9 +87,10 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 	var filesToProcess []string
 	var needsRebuild bool
 
+	// if incremental, detect changes
 	if incremental {
 		// Detect changes
-		changes, err := DetectChanges(projectDB, folderPath)
+		changes, err := detectChanges(projectDB, folderPath)
 		if err != nil {
 			return fmt.Errorf("failed to detect changes: %w", err)
 		}
@@ -373,7 +375,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 	defer projectDB.Close()
 
 	// Detect changes
-	changes, err := DetectChanges(projectDB, folderPath)
+	changes, err := detectChanges(projectDB, folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect changes: %w", err)
 	}
@@ -618,7 +620,7 @@ func processTextFileNew(file db.File, content string) ([]db.Chunk, []string, err
 }
 
 // DetectChanges compares filesystem state with database state to identify changes
-func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, error) {
+func detectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, error) {
 	// Get all files from database
 	dbFiles, err := projectDB.GetAllFiles()
 	if err != nil {
