@@ -14,6 +14,7 @@ import (
 
 func NewIndexCmd() *cobra.Command {
 	var incremental bool
+	var multimodal bool
 
 	cmd := &cobra.Command{
 		Use:   "index <folder>",
@@ -21,16 +22,17 @@ func NewIndexCmd() *cobra.Command {
 		Long:  "Recursively index all files in a folder and generate embeddings",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runIndex(args[0], incremental)
+			return runIndex(args[0], incremental, multimodal)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&incremental, "incremental", "i", false, "Only index new or changed files")
+	cmd.Flags().BoolVarP(&multimodal, "multimodal", "m", false, "Enable multimodal indexing (extract and index images from PDFs)")
 
 	return cmd
 }
 
-func runIndex(folderPath string, incremental bool) error {
+func runIndex(folderPath string, incremental bool, multimodal bool) error {
 
 	// Resolve to absolute path
 	absPath, err := filepath.Abs(folderPath)
@@ -67,8 +69,16 @@ func runIndex(folderPath string, incremental bool) error {
 
 	fmt.Printf("💾 Database: %s\n\n", dbPath)
 
-	// Create engine
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	// Use Voyage provider
+	providerType := "voyage"
+	enableMultimodal := multimodal || cfg.EnableMultimodal
+
+	// Create engine with provider configuration
+	eng := engine.NewEngineWithProvider(cfg.APIKey, cfg.Model, cfg.Endpoint, providerType, enableMultimodal)
+
+	if enableMultimodal {
+		fmt.Printf("🖼️  Multimodal indexing enabled (text + images)\n")
+	}
 
 	// If incremental, show status first
 	if incremental {
@@ -97,8 +107,12 @@ func runIndex(folderPath string, incremental bool) error {
 	start := time.Now()
 	var lastProgress string
 
+	var textChunks, imageChunks int
 	err = eng.IndexFolderIncremental(absPath, dbPath, incremental, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
+		if enableMultimodal {
+			progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)
+		}
 
 		// Clear previous line and print new progress
 		fmt.Print("\r" + strings.Repeat(" ", len(lastProgress)) + "\r")
