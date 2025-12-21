@@ -188,7 +188,7 @@ go test ./... -cover
 
 ```bash
 # Set .env or export variables
-go test ./internal/indexer/... -v
+go test ./internal/engine/indexer/... -v
 ```
 
 ### Demo
@@ -247,8 +247,10 @@ qwelli/
 │   ├── cli/             # Commands (init, index, search, shell)
 │   ├── config/          # Config file handling
 │   ├── db/              # DuckDB + HNSW index
-│   ├── engine/          # Index & search orchestration
-│   └── indexer/         # Embedding providers
+│   └── engine/          # Index & search orchestration
+│       ├── chunker/     # Content chunking strategies
+│       ├── indexer/     # Embedding providers
+│       └── processor/   # File processing (PDF, images, etc.)
 ├── tests/demo/          # Demo application
 └── dist/                # Built binaries
 ```
