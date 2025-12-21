@@ -5,7 +5,7 @@ Local semantic file search using vector embeddings. Index your folders and find 
 ## Prerequisites
 
 - Go 1.21+
-- OpenAI API key
+- Voyage AI API key
 - **Windows only:** GCC compiler (for CGO/DuckDB)
 
 ## Windows Setup (GCC for CGO)
@@ -31,10 +31,10 @@ DuckDB requires CGO which needs a C compiler. Install MSYS2:
 
 ## Quick Start
 
-### 1. Get OpenAI API Key
+### 1. Get Voyage AI API Key
 
-1. Go to https://platform.openai.com/api-keys
-2. Create a new key
+1. Go to https://www.voyageai.com/
+2. Sign up and create a new API key
 3. Copy it
 
 ### 2. Configure `.env`
@@ -42,9 +42,9 @@ DuckDB requires CGO which needs a C compiler. Install MSYS2:
 Create a `.env` file in the project root:
 
 ```
-QWELLI_EMBEDDING_KEY=sk-your-key
-QWELLI_EMBEDDING_MODEL=text-embedding-3-small
-QWELLI_EMBEDDING_ENDPOINT=https://api.openai.com/v1/embeddings
+QWELLI_EMBEDDING_KEY=your-voyage-api-key
+QWELLI_EMBEDDING_MODEL=voyage-multimodal-3
+QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
 ```
 
 ### 3. Build and Run (Windows)
@@ -221,21 +221,21 @@ go build -o qwelli ./cmd/qwelli
 
 ## Embedding Providers
 
-Currently supported: **OpenAI**
+Currently supported: **Voyage AI**
 
-### OpenAI Models
+### Voyage AI Models
 
-| Model                    | Dimension | Cost/1M tokens | Notes          |
-| ------------------------ | --------- | -------------- | -------------- |
-| `text-embedding-3-small` | 1536      | $0.02          | Recommended    |
-| `text-embedding-3-large` | 3072      | $0.13          | Higher quality |
+| Model                 | Dimension | Notes                      |
+| --------------------- | --------- | -------------------------- |
+| `voyage-multimodal-3` | 1024      | Multimodal (text + images) |
+| `voyage-3`            | 1024      | Text-only                  |
 
 ### Custom Endpoints
 
-For Azure OpenAI or compatible APIs:
+Default endpoint:
 
 ```
-QWELLI_EMBEDDING_ENDPOINT=https://your-resource.openai.azure.com/...
+QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
 ```
 
 ## Project Structure
@@ -264,14 +264,14 @@ Each indexed folder gets its own DuckDB database with HNSW vector index.
 
 ## How It Works
 
-1. **Index:** Scan folder → Generate embeddings via OpenAI → Store in DuckDB
+1. **Index:** Scan folder → Generate embeddings via Voyage AI → Store in DuckDB
 2. **Search:** Embed query → HNSW approximate nearest neighbor search → Return matches
 
 One embedding model per database. Change model = re-index.
 
 ## Cost
 
-Using OpenAI `text-embedding-3-small`:
+Using Voyage AI `voyage-multimodal-3`:
 
 - ~$0.02 per 1,000 documents indexed
 - ~$0.0001 per search query
