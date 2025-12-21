@@ -109,7 +109,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 				fmt.Println("❌ Usage: index <folder> [--incremental]")
 				continue
 			}
-			if err := runIndex(cmdArgs[0], incremental); err != nil {
+			if err := runIndex(cmdArgs[0], incremental, false); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			} else {
 				currentIndex = cmdArgs[0]
@@ -117,7 +117,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		case "search":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: search <query> [--top N]")
+				fmt.Println("❌ Usage: search <query> [--top N] [--images-only] [--text-only]")
 				continue
 			}
 
@@ -134,8 +134,8 @@ func runShell(cmd *cobra.Command, args []string) error {
 			}
 
 			// Parse query and flags
-			query, topN := parseSearchArgs(cmdArgs)
-			if err := runSearch(query, indexPath, topN); err != nil {
+			query, topN, textOnly, imagesOnly := parseSearchArgs(cmdArgs)
+			if err := runSearch(query, indexPath, topN, textOnly, imagesOnly); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
@@ -224,11 +224,25 @@ func runShell(cmd *cobra.Command, args []string) error {
 				}
 			}
 
+			// Normalize paths for comparison
+			deletedPathAbs, err := filepath.Abs(indexPath)
+			if err != nil {
+				deletedPathAbs = indexPath // Fallback to original if abs fails
+			}
+			currentPathAbs := ""
+			if currentIndex != "" {
+				if abs, err := filepath.Abs(currentIndex); err == nil {
+					currentPathAbs = abs
+				} else {
+					currentPathAbs = currentIndex // Fallback
+				}
+			}
+
 			if err := deleteIndexInteractive(indexPath, reader); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			} else {
-				// Clear current index if it was deleted
-				if indexPath == currentIndex {
+				// Clear current index if it was deleted (compare normalized paths)
+				if currentIndex != "" && deletedPathAbs == currentPathAbs {
 					currentIndex = ""
 				}
 				// Clear cached list to force refresh
@@ -250,6 +264,8 @@ func printShellHelp() {
   use <folder|#>        - Set current index folder (use number from list)
   search <query> [opts] - Search current index
     --top N, -t N       - Number of results (default: 5)
+    --images-only       - Search only image chunks
+    --text-only         - Search only text chunks
   list                  - List all indexed folders (with numbers)
   status [folder]       - Show index status
   delete <folder|#>     - Delete an index (asks for confirmation)
@@ -266,7 +282,8 @@ Examples:
   delete 1              - Delete the first index from the list
   delete ./my-folder    - Delete index for specific folder
   search hello          - Search for "hello" (top 5 results)
-  search hello --top 3  - Search for "hello" (top 3 results)`)
+  search hello --top 3  - Search for "hello" (top 3 results)
+  search hello --images-only - Search only images`)
 }
 
 // runListShell lists all indexed folders and caches them for numeric selection
@@ -291,7 +308,7 @@ func runListShell(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	eng := engine.NewEngineWithProvider(cfg.APIKey, cfg.Model, cfg.Endpoint, "voyage", false)
 	cachedIndexList = make([]string, len(files))
 
 	for i, dbFile := range files {
@@ -343,8 +360,8 @@ func useIndexByNumber(num int) error {
 	return nil
 }
 
-// parseSearchArgs parses search command arguments to extract query and --top flag
-func parseSearchArgs(args []string) (query string, topN int) {
+// parseSearchArgs parses search command arguments to extract query, --top flag, and content type filters
+func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imagesOnly bool) {
 	topN = 5 // default
 	queryParts := []string{}
 
@@ -358,11 +375,15 @@ func parseSearchArgs(args []string) (query string, topN int) {
 					continue
 				}
 			}
+		} else if args[i] == "--images-only" {
+			imagesOnly = true
+		} else if args[i] == "--text-only" {
+			textOnly = true
 		} else {
 			queryParts = append(queryParts, args[i])
 		}
 	}
 
 	query = strings.Join(queryParts, " ")
-	return query, topN
+	return query, topN, textOnly, imagesOnly
 }
