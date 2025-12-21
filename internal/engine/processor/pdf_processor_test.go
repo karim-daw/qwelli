@@ -106,17 +106,51 @@ func TestParsePDFDate(t *testing.T) {
 }
 
 // TestExtractText_WithSamplePDF tests PDF extraction with an actual PDF file
-// This test will be skipped if no sample PDF is available
+// Requires a sample PDF file to be available
 func TestExtractText_WithSamplePDF(t *testing.T) {
-	// Look for a sample PDF in the tests directory
-	samplePath := filepath.Join("..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf")
+	// Get current working directory (tests run from package directory)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
 
-	if _, err := os.Stat(samplePath); os.IsNotExist(err) {
-		t.Skip("Sample PDF not found, skipping test")
+	// Build paths relative to workspace root (go up 3 levels from internal/engine/processor/)
+	// internal/engine/processor -> engine -> internal -> qwelli (workspace root)
+	possiblePaths := []string{
+		// From workspace root (3 levels up)
+		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
+		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
+		// Relative from current dir
+		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
+		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
+	}
+
+	var path string
+	for _, p := range possiblePaths {
+		// Make path absolute
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			path = absPath
+			break
+		}
+	}
+
+	if path == "" {
+		// Show what we tried
+		var triedAbs []string
+		for _, p := range possiblePaths {
+			if abs, err := filepath.Abs(p); err == nil {
+				triedAbs = append(triedAbs, abs)
+			}
+		}
+		t.Fatalf("Sample PDF not found. Working directory: %s. Tried absolute paths: %v", wd, triedAbs)
 	}
 
 	processor := NewPDFProcessor()
-	pages, metadata, err := processor.ExtractText(samplePath)
+	pages, metadata, err := processor.ExtractText(path)
 
 	if err != nil {
 		t.Fatalf("ExtractText failed: %v", err)

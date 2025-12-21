@@ -70,11 +70,10 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 	fmt.Printf("💾 Database: %s\n\n", dbPath)
 
 	// Use Voyage provider
-	providerType := "voyage"
 	enableMultimodal := multimodal || cfg.EnableMultimodal
 
 	// Create engine with provider configuration
-	eng := engine.NewEngineWithProvider(cfg.APIKey, cfg.Model, cfg.Endpoint, providerType, enableMultimodal)
+	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, enableMultimodal)
 
 	if enableMultimodal {
 		fmt.Printf("🖼️  Multimodal indexing enabled (text + images)\n")
@@ -108,7 +107,7 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 	var lastProgress string
 
 	var textChunks, imageChunks int
-	err = eng.IndexFolderIncremental(absPath, dbPath, incremental, func(current, total int, filename string) {
+	err = eng.IndexFolder(absPath, dbPath, incremental, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
 		if enableMultimodal {
 			progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)

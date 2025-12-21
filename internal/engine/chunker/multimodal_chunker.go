@@ -1,35 +1,23 @@
-package processor
+package chunker
 
 import (
 	"fmt"
 	"log"
 	"sort"
+
+	"github.com/karim-daw/qwelli/internal/engine/processor"
 )
 
-// MultimodalChunk represents either a text chunk or an image chunk
-type MultimodalChunk struct {
-	Content     string
-	ContentType string // "text" or "image"
-	PageNumber  int
-	ChunkIndex  int
-	TotalChunks int
-	Metadata    map[string]interface{}
-
-	// Image-specific fields
-	ImageData   []byte
-	ImageFormat string
-	ImageWidth  int
-	ImageHeight int
-}
-
 // MultimodalChunker orchestrates text and image chunking from PDFs
+// This chunker combines text chunks from PDF pages with image chunks extracted from PDFs
+// Future: Can be extended to handle standalone image files
 type MultimodalChunker struct {
-	pdfChunker     *PDFChunker
-	imageExtractor *ImageExtractor
+	pdfChunker     *Chunker
+	imageExtractor *processor.ImageExtractor
 }
 
 // NewMultimodalChunker creates a new multimodal chunker
-func NewMultimodalChunker(pdfChunker *PDFChunker, imageExtractor *ImageExtractor) *MultimodalChunker {
+func NewMultimodalChunker(pdfChunker *Chunker, imageExtractor *processor.ImageExtractor) *MultimodalChunker {
 	return &MultimodalChunker{
 		pdfChunker:     pdfChunker,
 		imageExtractor: imageExtractor,
@@ -37,32 +25,21 @@ func NewMultimodalChunker(pdfChunker *PDFChunker, imageExtractor *ImageExtractor
 }
 
 // ChunkPDF processes a PDF and returns both text and image chunks, sequenced by page
-func (m *MultimodalChunker) ChunkPDF(pages []PDFPage, images []PDFImage, metadata *PDFMetadata, filePath string) ([]MultimodalChunk, error) {
-	var allChunks []MultimodalChunk
+// Returns unified Chunk types that can represent both text and image content
+func (m *MultimodalChunker) ChunkPDF(pages []processor.PDFPage, images []processor.PDFImage, metadata *processor.PDFMetadata, filePath string) ([]Chunk, error) {
+	var allChunks []Chunk
 
 	// First, get text chunks from PDFChunker
-	textChunks, err := m.pdfChunker.ChunkPDFPages(pages, metadata, filePath)
+	// Use the PDFChunkStrategy constructor
+	pdfStrategy := NewPDFChunkStrategy(metadata, filePath)
+	// Pass empty map instead of nil to allow PDFChunkStrategy to merge any additional metadata
+	textChunks, err := pdfStrategy.Chunkify(pages, m.pdfChunker.config, make(map[string]interface{}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to chunk PDF text: %w", err)
 	}
 
-	// Convert text chunks to multimodal chunks
-	for _, tc := range textChunks {
-		pageNum := 1
-		if len(tc.PageNumbers) > 0 {
-			pageNum = tc.PageNumbers[0]
-		}
-
-		chunk := MultimodalChunk{
-			Content:     tc.Content,
-			ContentType: "text",
-			PageNumber:  pageNum,
-			ChunkIndex:  tc.ChunkIndex,
-			TotalChunks: tc.TotalChunks,
-			Metadata:    tc.Metadata,
-		}
-		allChunks = append(allChunks, chunk)
-	}
+	// Text chunks are already in the unified Chunk format, just add them
+	allChunks = append(allChunks, textChunks...)
 
 	// Add image chunks (filter out tiny and huge images)
 	skippedTooSmall := 0
@@ -93,11 +70,11 @@ func (m *MultimodalChunker) ChunkPDF(pages []PDFPage, images []PDFImage, metadat
 		}
 
 		// Store base64-encoded image data
-		imageBase64Bytes := []byte(img.GetImageBase64())
-		chunk := MultimodalChunk{
+		imageBase64Bytes := []byte(img.Base64)
+		chunk := Chunk{
 			Content:     fmt.Sprintf("Image from page %d (%dx%d, %s)", img.PageNumber, img.Width, img.Height, img.Format),
 			ContentType: "image",
-			PageNumber:  img.PageNumber,
+			PageNumbers: []int{img.PageNumber},
 			ImageData:   imageBase64Bytes, // Store base64 string as bytes
 			ImageFormat: img.Format,
 			ImageWidth:  img.Width,
@@ -119,8 +96,17 @@ func (m *MultimodalChunker) ChunkPDF(pages []PDFPage, images []PDFImage, metadat
 
 	// Sort chunks by page number, then by type (text before images on same page)
 	sort.Slice(allChunks, func(i, j int) bool {
-		if allChunks[i].PageNumber != allChunks[j].PageNumber {
-			return allChunks[i].PageNumber < allChunks[j].PageNumber
+		pageI := 0
+		pageJ := 0
+		if len(allChunks[i].PageNumbers) > 0 {
+			pageI = allChunks[i].PageNumbers[0]
+		}
+		if len(allChunks[j].PageNumbers) > 0 {
+			pageJ = allChunks[j].PageNumbers[0]
+		}
+
+		if pageI != pageJ {
+			return pageI < pageJ
 		}
 		// On same page, text comes before images
 		if allChunks[i].ContentType != allChunks[j].ContentType {

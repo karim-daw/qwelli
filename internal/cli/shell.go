@@ -117,7 +117,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		case "search":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: search <query> [--top N] [--images-only] [--text-only]")
+				fmt.Println("❌ Usage: search <query> [--top N] [--images-only] [--text-only] [--strategy semantic|keyword|hybrid]")
 				continue
 			}
 
@@ -134,8 +134,8 @@ func runShell(cmd *cobra.Command, args []string) error {
 			}
 
 			// Parse query and flags
-			query, topN, textOnly, imagesOnly := parseSearchArgs(cmdArgs)
-			if err := runSearch(query, indexPath, topN, textOnly, imagesOnly); err != nil {
+			query, topN, textOnly, imagesOnly, strategy := parseSearchArgs(cmdArgs)
+			if err := runSearchShell(query, indexPath, topN, textOnly, imagesOnly, strategy); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
@@ -308,7 +308,7 @@ func runListShell(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
-	eng := engine.NewEngineWithProvider(cfg.APIKey, cfg.Model, cfg.Endpoint, "voyage", false)
+	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
 	cachedIndexList = make([]string, len(files))
 
 	for i, dbFile := range files {
@@ -360,9 +360,10 @@ func useIndexByNumber(num int) error {
 	return nil
 }
 
-// parseSearchArgs parses search command arguments to extract query, --top flag, and content type filters
-func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imagesOnly bool) {
-	topN = 5 // default
+// parseSearchArgs parses search command arguments to extract query, --top flag, content type filters, and strategy
+func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imagesOnly bool, strategy string) {
+	topN = 5              // default
+	strategy = "semantic" // default
 	queryParts := []string{}
 
 	for i := 0; i < len(args); i++ {
@@ -375,15 +376,22 @@ func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imag
 					continue
 				}
 			}
-		} else if args[i] == "--images-only" {
+		} else if args[i] == "--images-only" || args[i] == "--image-only" {
 			imagesOnly = true
 		} else if args[i] == "--text-only" {
 			textOnly = true
+		} else if args[i] == "--strategy" {
+			// Next arg should be the strategy name
+			if i+1 < len(args) {
+				strategy = args[i+1]
+				i++ // skip the strategy name
+				continue
+			}
 		} else {
 			queryParts = append(queryParts, args[i])
 		}
 	}
 
 	query = strings.Join(queryParts, " ")
-	return query, topN, textOnly, imagesOnly
+	return query, topN, textOnly, imagesOnly, strategy
 }

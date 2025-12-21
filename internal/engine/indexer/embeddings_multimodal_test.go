@@ -26,7 +26,7 @@ func TestEmbedder_IsMultimodal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder, err := NewEmbedder("voyage", "test-key", "voyage-multimodal-3", server.URL)
+	embedder, err := NewEmbedder("test-key", "voyage-multimodal-3", server.URL)
 	if err != nil {
 		t.Fatalf("NewEmbedder() error = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEmbedder_GetMultimodalProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder, err := NewEmbedder("voyage", "test-key", "voyage-multimodal-3", server.URL)
+	embedder, err := NewEmbedder("test-key", "voyage-multimodal-3", server.URL)
 	if err != nil {
 		t.Fatalf("NewEmbedder() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestEmbedder_EmbedImage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder, err := NewEmbedder("voyage", "test-key", "voyage-multimodal-3", server.URL)
+	embedder, err := NewEmbedder("test-key", "voyage-multimodal-3", server.URL)
 	if err != nil {
 		t.Fatalf("NewEmbedder() error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestEmbedder_EmbedMultimodal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder, err := NewEmbedder("voyage", "test-key", "voyage-multimodal-3", server.URL)
+	embedder, err := NewEmbedder("test-key", "voyage-multimodal-3", server.URL)
 	if err != nil {
 		t.Fatalf("NewEmbedder() error = %v", err)
 	}

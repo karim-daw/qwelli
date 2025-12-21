@@ -10,13 +10,11 @@ type Embedder struct {
 }
 
 // NewEmbedder creates an embedder with Voyage AI provider
-func NewEmbedder(providerType, apiKey, model, endpoint string) (*Embedder, error) {
-	// Always use Voyage provider
+func NewEmbedder(apiKey, model, endpoint string) (*Embedder, error) {
 	provider, err := NewVoyageEmbeddingProvider(apiKey, model, endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Voyage provider: %w", err)
+		return nil, err
 	}
-
 	return &Embedder{provider: provider}, nil
 }
 

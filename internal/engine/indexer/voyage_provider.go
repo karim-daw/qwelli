@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/karim-daw/qwelli/internal/processor"
+	"github.com/karim-daw/qwelli/internal/textutil"
 )
 
 // VoyageEmbeddingProvider implements MultimodalEmbeddingProvider for Voyage AI
@@ -194,7 +194,7 @@ func (p *VoyageEmbeddingProvider) createMultimodalBatches(inputs []MultimodalInp
 		var inputTokens int
 		switch input.Type {
 		case "text":
-			inputTokens = processor.EstimateTokens(input.Text)
+			inputTokens = textutil.EstimateTokens(input.Text)
 		case "image":
 			if input.ImagePixels > 0 {
 				inputTokens = (input.ImagePixels + pixelsPerImageToken - 1) / pixelsPerImageToken
@@ -238,7 +238,7 @@ func (p *VoyageEmbeddingProvider) createMultimodalBatches(inputs []MultimodalInp
 			for _, inp := range batch {
 				switch inp.Type {
 				case "text":
-					batchTokens += processor.EstimateTokens(inp.Text)
+					batchTokens += textutil.EstimateTokens(inp.Text)
 					textCount++
 				case "image":
 					if inp.ImagePixels > 0 {

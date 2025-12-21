@@ -82,7 +82,7 @@ func TestParseSearchArgs_FlagParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, topN, textOnly, imagesOnly := parseSearchArgs(tt.args)
+			query, topN, textOnly, imagesOnly, strategy := parseSearchArgs(tt.args)
 			if query != tt.wantQuery {
 				t.Errorf("parseSearchArgs() query = %q, want %q", query, tt.wantQuery)
 			}
@@ -94,6 +94,10 @@ func TestParseSearchArgs_FlagParsing(t *testing.T) {
 			}
 			if imagesOnly != tt.wantImagesOnly {
 				t.Errorf("parseSearchArgs() imagesOnly = %v, want %v", imagesOnly, tt.wantImagesOnly)
+			}
+			// Strategy should default to "semantic"
+			if strategy != "semantic" {
+				t.Errorf("parseSearchArgs() strategy = %q, want %q", strategy, "semantic")
 			}
 		})
 	}
