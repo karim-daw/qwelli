@@ -40,7 +40,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
 
 	for i, dbFile := range files {
 		// Get stats
@@ -110,7 +110,7 @@ func runStatus(indexPath string) error {
 		return fmt.Errorf("index not found for %s. Run 'qwelli index %s' first", absPath, absPath)
 	}
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
 
 	// Get index status with pending changes
 	status, err := eng.GetIndexStatus(dbPath, absPath)

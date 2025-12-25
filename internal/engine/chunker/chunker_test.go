@@ -1,8 +1,10 @@
-package processor
+package chunker
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/karim-daw/qwelli/internal/textutil"
 )
 
 func TestChunkByTokens_SmallDocument(t *testing.T) {
@@ -17,7 +19,7 @@ func TestChunkByTokens_SmallDocument(t *testing.T) {
 		"file_name": "test.txt",
 	}
 
-	chunks, err := chunker.ChunkByTokens(text, baseMetadata)
+	chunks, err := chunker.strategy.Chunkify(text, chunker.config, baseMetadata)
 	if err != nil {
 		t.Fatalf("ChunkByTokens failed: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestChunkByTokens_LargeDocument(t *testing.T) {
 
 	// Verify no chunk exceeds the size limit (with some tolerance)
 	for i, chunk := range chunks {
-		tokens := EstimateTokens(chunk.Content)
+		tokens := textutil.EstimateTokens(chunk.Content)
 		// Allow some overage since we don't split mid-sentence
 		if tokens > chunker.config.ChunkSize*2 {
 			t.Errorf("Chunk %d has %d tokens, exceeds limit too much", i, tokens)
@@ -182,7 +184,7 @@ func TestSplitIntoSentences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sentences := splitIntoSentences(tt.input)
+			sentences := textutil.SplitIntoSentences(tt.input)
 			if len(sentences) != tt.expected {
 				t.Errorf("Expected %d sentences, got %d: %v", tt.expected, len(sentences), sentences)
 			}

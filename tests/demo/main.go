@@ -13,8 +13,8 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/indexer"
-	"github.com/karim-daw/qwelli/internal/processor"
+	"github.com/karim-daw/qwelli/internal/engine/indexer"
+	"github.com/karim-daw/qwelli/internal/engine/processor"
 )
 
 func main() {
@@ -23,9 +23,9 @@ func main() {
 
 	testFolder := "tests/demo/testdata"
 	dbPath := "demo.db"
-	modelName := os.Getenv("QWELLI_EMBEDDING_MODEL") // text-embedding-3-small
+	modelName := os.Getenv("QWELLI_EMBEDDING_MODEL") // voyage-multimodal-3
 	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
-	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") // https://api.openai.com/v1/embeddings
+	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT") // https://api.voyageai.com/v1/multimodalembeddings
 
 	// Clean up existing database
 	os.Remove(dbPath)

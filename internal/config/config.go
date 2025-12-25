@@ -11,10 +11,14 @@ import (
 // Config holds the application configuration
 type Config struct {
 	// Embedding provider settings
-	EmbeddingProvider string `yaml:"embedding_provider"` // "openai", etc.
+	EmbeddingProvider string `yaml:"embedding_provider"` // "voyage" (default)
 	APIKey            string `yaml:"api_key"`
 	Model             string `yaml:"model"`
 	Endpoint          string `yaml:"endpoint"`
+
+	// Multimodal settings
+	EnableMultimodal bool   `yaml:"enable_multimodal"` // Enable multimodal embeddings (images)
+	ImageQuality     string `yaml:"image_quality"`     // "low", "medium", "high" (default: "medium")
 
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
@@ -25,10 +29,12 @@ func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 
 	return &Config{
-		EmbeddingProvider: "voyagerAI",
+		EmbeddingProvider: "voyage",
 		APIKey:            os.Getenv("QWELLI_EMBEDDING_KEY"),
 		Model:             os.Getenv("QWELLI_EMBEDDING_MODEL"),
 		Endpoint:          os.Getenv("QWELLI_EMBEDDING_ENDPOINT"),
+		EnableMultimodal:  true, // Default to true for Voyage
+		ImageQuality:      "medium",
 		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }

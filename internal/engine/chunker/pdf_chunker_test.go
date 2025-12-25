@@ -1,8 +1,10 @@
-package processor
+package chunker
 
 import (
 	"testing"
 	"time"
+
+	"github.com/karim-daw/qwelli/internal/engine/processor"
 )
 
 func TestNewPDFChunker(t *testing.T) {
@@ -11,30 +13,34 @@ func TestNewPDFChunker(t *testing.T) {
 		OverlapSize: 150,
 	}
 
-	chunker := NewPDFChunker(config)
+	chunker := NewChunker(config)
 
 	if chunker == nil {
-		t.Fatal("NewPDFChunker returned nil")
+		t.Fatal("NewChunker returned nil")
 	}
 
-	if chunker.chunker == nil {
-		t.Fatal("PDFChunker has nil internal chunker")
+	if chunker.config.ChunkSize != 1000 {
+		t.Errorf("Expected ChunkSize 1000, got %d", chunker.config.ChunkSize)
+	}
+
+	if chunker.config.OverlapSize != 150 {
+		t.Errorf("Expected OverlapSize 150, got %d", chunker.config.OverlapSize)
 	}
 }
 
 func TestChunkPDFPages_SmallPDF(t *testing.T) {
-	chunker := NewPDFChunker(ChunkerConfig{
+	chunker := NewChunker(ChunkerConfig{
 		ChunkSize:   1000,
 		OverlapSize: 150,
 	})
 
 	// Create a small PDF with 2 pages
-	pages := []PDFPage{
+	pages := []processor.PDFPage{
 		{PageNumber: 1, Text: "This is the first page. It has some content."},
 		{PageNumber: 2, Text: "This is the second page. It has different content."},
 	}
 
-	metadata := &PDFMetadata{
+	metadata := &processor.PDFMetadata{
 		Title:     "Test Document",
 		PageCount: 2,
 	}
@@ -83,19 +89,19 @@ func TestChunkPDFPages_SmallPDF(t *testing.T) {
 }
 
 func TestChunkPDFPages_LargePDF(t *testing.T) {
-	chunker := NewPDFChunker(ChunkerConfig{
+	chunker := NewChunker(ChunkerConfig{
 		ChunkSize:   100, // Small chunk size to force multiple chunks
 		OverlapSize: 20,
 	})
 
 	// Create a larger PDF with multiple pages
-	pages := []PDFPage{
+	pages := []processor.PDFPage{
 		{PageNumber: 1, Text: "This is page one with a lot of text. It contains multiple sentences to ensure chunking happens. We want to test the page tracking."},
 		{PageNumber: 2, Text: "This is page two with more content. It also has multiple sentences. The chunker should track which pages each chunk comes from."},
 		{PageNumber: 3, Text: "This is page three. It has additional content. The page numbers should be correctly mapped to chunks."},
 	}
 
-	metadata := &PDFMetadata{
+	metadata := &processor.PDFMetadata{
 		Title:        "Large Test Document",
 		PageCount:    3,
 		Creator:      "Test Creator",
@@ -152,18 +158,18 @@ func TestChunkPDFPages_LargePDF(t *testing.T) {
 }
 
 func TestChunkPDFPages_EmptyPDF(t *testing.T) {
-	chunker := NewPDFChunker(ChunkerConfig{
+	chunker := NewChunker(ChunkerConfig{
 		ChunkSize:   1000,
 		OverlapSize: 150,
 	})
 
 	// PDF with no text
-	pages := []PDFPage{
+	pages := []processor.PDFPage{
 		{PageNumber: 1, Text: ""},
 		{PageNumber: 2, Text: ""},
 	}
 
-	metadata := &PDFMetadata{
+	metadata := &processor.PDFMetadata{
 		Title:     "Empty Document",
 		PageCount: 2,
 	}
@@ -184,18 +190,18 @@ func TestChunkPDFPages_EmptyPDF(t *testing.T) {
 }
 
 func TestChunkPDFPages_PageNumberTracking(t *testing.T) {
-	chunker := NewPDFChunker(ChunkerConfig{
+	chunker := NewChunker(ChunkerConfig{
 		ChunkSize:   50, // Very small to test page tracking
 		OverlapSize: 10,
 	})
 
-	pages := []PDFPage{
+	pages := []processor.PDFPage{
 		{PageNumber: 1, Text: "Page one text goes here."},
 		{PageNumber: 2, Text: "Page two text goes here."},
 		{PageNumber: 3, Text: "Page three text goes here."},
 	}
 
-	metadata := &PDFMetadata{
+	metadata := &processor.PDFMetadata{
 		Title:     "Page Tracking Test",
 		PageCount: 3,
 	}
@@ -225,19 +231,19 @@ func TestChunkPDFPages_PageNumberTracking(t *testing.T) {
 }
 
 func TestChunkPDFPages_MetadataStructure(t *testing.T) {
-	chunker := NewPDFChunker(ChunkerConfig{
+	chunker := NewChunker(ChunkerConfig{
 		ChunkSize:   1000,
 		OverlapSize: 150,
 	})
 
-	pages := []PDFPage{
+	pages := []processor.PDFPage{
 		{PageNumber: 1, Text: "Test content."},
 	}
 
 	creationDate := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 	modDate := time.Date(2024, 2, 20, 14, 20, 0, 0, time.UTC)
 
-	metadata := &PDFMetadata{
+	metadata := &processor.PDFMetadata{
 		Title:        "Metadata Test",
 		Creator:      "Test Creator",
 		CreationDate: creationDate,

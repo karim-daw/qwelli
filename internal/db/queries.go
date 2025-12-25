@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -149,11 +148,17 @@ func (p *ProjectDB) InsertChunk(chunk Chunk) error {
 	// Convert page_numbers []int to DuckDB array format
 	pageNumbersStr := formatIntArray(chunk.PageNumbers)
 
+	// Set default content_type if not set
+	contentType := chunk.ContentType
+	if contentType == "" {
+		contentType = "text"
+	}
+
 	_, err := p.conn.Exec(`
 		INSERT INTO chunks (
 			chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
-			start_token, end_token, page_numbers
+			page_numbers, content_type, image_data
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (chunk_id) DO UPDATE SET
 			file_id = EXCLUDED.file_id,
@@ -162,12 +167,12 @@ func (p *ProjectDB) InsertChunk(chunk Chunk) error {
 			chunk_index = EXCLUDED.chunk_index,
 			total_chunks = EXCLUDED.total_chunks,
 			content = EXCLUDED.content,
-			start_token = EXCLUDED.start_token,
-			end_token = EXCLUDED.end_token,
-			page_numbers = EXCLUDED.page_numbers`,
+			page_numbers = EXCLUDED.page_numbers,
+			content_type = EXCLUDED.content_type,
+			image_data = EXCLUDED.image_data`,
 		chunk.ChunkID, chunk.FileID, chunk.FilePath, chunk.FileType,
 		chunk.ChunkIndex, chunk.TotalChunks, chunk.Content,
-		chunk.StartToken, chunk.EndToken, pageNumbersStr,
+		pageNumbersStr, contentType, chunk.ImageData,
 	)
 	return err
 }
@@ -176,27 +181,23 @@ func (p *ProjectDB) GetChunk(chunkID string) (*Chunk, error) {
 	row := p.conn.QueryRow(`
 		SELECT chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
-			start_token, end_token, page_numbers
+			page_numbers, content_type, image_data
 		FROM chunks WHERE chunk_id = $1
 	`, chunkID)
 
 	var c Chunk
-	var startToken, endToken sql.NullInt64
 	var pageNumbersIface interface{}
+	var imageData []byte
 
 	if err := row.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
 		&c.ChunkIndex, &c.TotalChunks, &c.Content,
-		&startToken, &endToken, &pageNumbersIface); err != nil {
+		&pageNumbersIface, &c.ContentType, &imageData); err != nil {
 		return nil, err
 	}
 
-	if startToken.Valid {
-		val := int(startToken.Int64)
-		c.StartToken = &val
-	}
-	if endToken.Valid {
-		val := int(endToken.Int64)
-		c.EndToken = &val
+	c.ImageData = imageData
+	if c.ContentType == "" {
+		c.ContentType = "text"
 	}
 
 	c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)
@@ -207,7 +208,7 @@ func (p *ProjectDB) GetChunksForFile(fileID string) ([]Chunk, error) {
 	rows, err := p.conn.Query(`
 		SELECT chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
-			start_token, end_token, page_numbers
+			page_numbers, content_type, image_data
 		FROM chunks WHERE file_id = $1 ORDER BY chunk_index
 	`, fileID)
 	if err != nil {
@@ -218,22 +219,54 @@ func (p *ProjectDB) GetChunksForFile(fileID string) ([]Chunk, error) {
 	var chunks []Chunk
 	for rows.Next() {
 		var c Chunk
-		var startToken, endToken sql.NullInt64
 		var pageNumbersIface interface{}
+		var imageData []byte
 
 		if err := rows.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
 			&c.ChunkIndex, &c.TotalChunks, &c.Content,
-			&startToken, &endToken, &pageNumbersIface); err != nil {
+			&pageNumbersIface, &c.ContentType, &imageData); err != nil {
 			return nil, err
 		}
 
-		if startToken.Valid {
-			val := int(startToken.Int64)
-			c.StartToken = &val
+		c.ImageData = imageData
+		if c.ContentType == "" {
+			c.ContentType = "text"
 		}
-		if endToken.Valid {
-			val := int(endToken.Int64)
-			c.EndToken = &val
+
+		c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)
+		chunks = append(chunks, c)
+	}
+	return chunks, nil
+}
+
+// GetChunksByType returns chunks filtered by content type for a specific file
+func (p *ProjectDB) GetChunksByType(contentType string, fileID string) ([]Chunk, error) {
+	rows, err := p.conn.Query(`
+		SELECT chunk_id, file_id, file_path, file_type,
+			chunk_index, total_chunks, content,
+			page_numbers, content_type, image_data
+		FROM chunks WHERE file_id = $1 AND content_type = $2 ORDER BY chunk_index
+	`, fileID, contentType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []Chunk
+	for rows.Next() {
+		var c Chunk
+		var pageNumbersIface interface{}
+		var imageData []byte
+
+		if err := rows.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
+			&c.ChunkIndex, &c.TotalChunks, &c.Content,
+			&pageNumbersIface, &c.ContentType, &imageData); err != nil {
+			return nil, err
+		}
+
+		c.ImageData = imageData
+		if c.ContentType == "" {
+			c.ContentType = "text"
 		}
 
 		c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)

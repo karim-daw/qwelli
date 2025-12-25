@@ -1,10 +1,7 @@
 package engine
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,19 +9,12 @@ import (
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/indexer"
-	"github.com/karim-daw/qwelli/internal/processor"
+	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
+	"github.com/karim-daw/qwelli/internal/engine/indexer"
+	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/scanner"
+	"github.com/karim-daw/qwelli/internal/engine/search"
 )
-
-type Engine struct {
-	apiKey   string
-	model    string
-	endpoint string
-}
-
-func NewEngine(apiKey, model, endpoint string) *Engine {
-	return &Engine{apiKey: apiKey, model: model, endpoint: endpoint}
-}
 
 type SearchResult struct {
 	FilePath     string
@@ -34,24 +24,28 @@ type SearchResult struct {
 	TextMetadata map[string]interface{}
 }
 
-// ChangeSet represents files that need to be added, updated, or deleted
-type ChangeSet struct {
-	ToAdd    []string
-	ToUpdate []string
-	ToDelete []string
+type Engine struct {
+	apiKey           string
+	model            string
+	endpoint         string
+	enableMultimodal bool
 }
 
-func (e *Engine) IndexFolder(folderPath, dbPath string, progressCallback func(current, total int, filename string)) error {
-	return e.IndexFolderIncremental(folderPath, dbPath, false, progressCallback)
+func NewEngine(apiKey, model, endpoint string, enableMultimodal bool) *Engine {
+	return &Engine{
+		apiKey:           apiKey,
+		model:            model,
+		endpoint:         endpoint,
+		enableMultimodal: enableMultimodal,
+	}
 }
 
-func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string)) error {
+func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string)) error {
 	// Detect dimension
 	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
 	if err != nil {
 		return err
 	}
-
 	testEmbed, err := embedder.Embed("test")
 	if err != nil {
 		return err
@@ -90,7 +84,7 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 	// if incremental, detect changes
 	if incremental {
 		// Detect changes
-		changes, err := detectChanges(projectDB, folderPath)
+		changes, err := scanner.DetectChanges(projectDB, folderPath)
 		if err != nil {
 			return fmt.Errorf("failed to detect changes: %w", err)
 		}
@@ -129,7 +123,7 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 		}
 	} else {
 		// Full index: process all files
-		allFiles, err := scanFolder(folderPath)
+		allFiles, err := scanner.ScanFolder(folderPath)
 		if err != nil {
 			return err
 		}
@@ -142,7 +136,6 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 
 	// Process files
 	var allChunks []db.Chunk
-	var allContents []string
 
 	for i, f := range filesToProcess {
 		if progressCallback != nil {
@@ -169,11 +162,11 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 		}
 
 		// Create file record
-		fileID := generateFileID(absPath)
+		fileID := scanner.GenerateFileID(absPath)
 		file := db.File{
 			FileID:     fileID,
 			Path:       absPath,
-			FileType:   getFileType(absPath),
+			FileType:   scanner.GetFileTypeFromPath(absPath),
 			FileHash:   fileHash,
 			ModifiedAt: info.ModTime(),
 			Size:       info.Size(),
@@ -185,63 +178,55 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 			continue
 		}
 
-		// Process file and create chunks
-		var chunks []db.Chunk
-		var contents []string
+		// Process file and create chunks using file processor registry
+		processor := fileprocessor.GetProcessor(file.FileType)
+		if processor == nil {
+			log.Printf("⚠️  No processor found for file type %s: %s", file.FileType, absPath)
+			continue
+		}
 
-		if strings.ToLower(filepath.Ext(absPath)) == ".pdf" {
-			chunks, contents, err = processPDFFileNew(file)
-			if err != nil {
-				log.Printf("⚠️  Failed to process PDF %s: %v", filepath.Base(absPath), err)
-				continue
-			}
-		} else {
+		// Prepare processing options
+		options := fileprocessor.ProcessOptions{
+			EnableMultimodal: e.enableMultimodal && embedder.IsMultimodal(),
+			ChunkSize:        300,
+			OverlapSize:      10,
+		}
+
+		// For text files, read content first
+		if file.FileType != "pdf" {
 			// Skip very large text files
 			if info.Size() > 500*1024 {
 				continue
 			}
 
-			// Read text file
 			content, err := os.ReadFile(absPath)
 			if err != nil {
 				log.Printf("⚠️  Failed to read file %s: %v", absPath, err)
 				continue
 			}
+			options.FileContent = string(content)
+		}
 
-			chunks, contents, err = processTextFileNew(file, string(content))
-			if err != nil {
-				log.Printf("⚠️  Failed to process text file %s: %v", absPath, err)
-				continue
-			}
+		chunks, _, err := processor.Process(file, options)
+		if err != nil {
+			log.Printf("⚠️  Failed to process file %s: %v", filepath.Base(absPath), err)
+			continue
 		}
 
 		allChunks = append(allChunks, chunks...)
-		allContents = append(allContents, contents...)
 	}
 
-	// Generate embeddings for all chunks
-	if len(allContents) > 0 {
-		embeddings, err := embedder.EmbedBatch(allContents)
+	// Generate embeddings for all chunks using EmbeddingGenerator
+	if len(allChunks) > 0 {
+		embeddingGen := NewEmbeddingGenerator(embedder, e.enableMultimodal)
+		embeddingMap, err := embeddingGen.GenerateEmbeddings(allChunks)
 		if err != nil {
 			return fmt.Errorf("failed to generate embeddings: %w", err)
 		}
 
-		// Insert chunks and embeddings
-		for i, chunk := range allChunks {
-			if err := projectDB.InsertChunk(chunk); err != nil {
-				log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
-				continue
-			}
-
-			if i < len(embeddings) {
-				if err := projectDB.InsertEmbedding(db.Embedding{
-					ChunkID: chunk.ChunkID,
-					Vector:  embeddings[i],
-				}); err != nil {
-					log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunk.ChunkID, err)
-					continue
-				}
-			}
+		// Store chunks and embeddings
+		if err := StoreChunksAndEmbeddings(projectDB, allChunks, embeddingMap); err != nil {
+			return fmt.Errorf("failed to store chunks and embeddings: %w", err)
 		}
 	}
 
@@ -258,37 +243,77 @@ func (e *Engine) IndexFolderIncremental(folderPath, dbPath string, incremental b
 	return nil
 }
 
+// Search performs a search using the default (semantic) strategy
 func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, error) {
-	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
-	if err != nil {
-		return nil, err
+	return e.SearchWithStrategy(query, dbPath, topK, "", "semantic")
+}
+
+// SearchWithFilter performs a search with content type filtering using the default (semantic) strategy
+func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, contentType string) ([]SearchResult, error) {
+	return e.SearchWithStrategy(query, dbPath, topK, contentType, "semantic")
+}
+
+// SearchWithStrategy performs a search using the specified strategy
+// strategy can be "semantic", "keyword", or "hybrid"
+func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
+	// Get the search strategy
+	var strategy search.SearchStrategy
+
+	switch strategyName {
+	case "semantic":
+		strategy = search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
+	case "keyword":
+		strategy = search.NewKeywordSearchStrategy()
+	case "hybrid":
+		semantic := search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
+		keyword := search.NewKeywordSearchStrategy()
+		strategy = search.NewHybridSearchStrategy(semantic, keyword)
+	default:
+		// Fall back to semantic
+		strategy = search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
 	}
 
-	queryVec, err := embedder.Embed(query)
+	// Open database - we need dimension, so try to get it from DB first
+	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
-		return nil, err
+		// If dimension not found, we need to create embedder to get dimension
+		embedder, err2 := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to get dimension: %w", err)
+		}
+		testEmbed, err2 := embedder.Embed("test")
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to get dimension: %w", err)
+		}
+		dim = len(testEmbed)
 	}
 
-	projectDB, err := db.OpenProjectDB(dbPath, len(queryVec))
+	projectDB, err := db.OpenProjectDB(dbPath, dim)
 	if err != nil {
 		return nil, err
 	}
 	defer projectDB.Close()
 
-	results, err := projectDB.SearchANN(queryVec, topK)
+	// Perform search using strategy
+	results, err := strategy.Search(query, projectDB, topK, contentType)
 	if err != nil {
 		return nil, err
 	}
 
+	// Convert db.SearchResult to engine.SearchResult
 	var out []SearchResult
 	for _, r := range results {
-		// New SearchResult already contains all needed fields from chunks table
 		// Build metadata from available fields
 		metadata := make(map[string]interface{})
 		metadata["chunk_index"] = r.ChunkIndex
 		metadata["total_chunks"] = r.TotalChunks
 		if len(r.PageNumbers) > 0 {
 			metadata["page_numbers"] = r.PageNumbers
+		}
+
+		metadata["content_type"] = r.ContentType
+		if r.ContentType == "image" && len(r.ImageData) > 0 {
+			metadata["has_image"] = true
 		}
 
 		out = append(out, SearchResult{
@@ -344,26 +369,8 @@ func (e *Engine) GetFolderPath(dbPath string) (string, error) {
 	return projectDB.GetMetadata("folder_path")
 }
 
-// IndexStatus represents the status of an index with pending changes
-type IndexStatus struct {
-	ToAdd    []FileStatus // New files not yet indexed
-	ToUpdate []FileStatus // Changed files needing re-index
-	ToDelete []FileStatus // Files deleted from filesystem but still in DB
-	Total    int          // Total files in index
-	UpToDate int          // Files that are current
-}
-
-// FileStatus represents a file with its status information
-type FileStatus struct {
-	Path       string
-	FileType   string
-	Size       int64
-	ModifiedAt time.Time
-	Reason     string // "new", "modified", "deleted"
-}
-
 // GetIndexStatus returns the status of an index showing pending changes
-func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error) {
+func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus, error) {
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -375,15 +382,15 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 	defer projectDB.Close()
 
 	// Detect changes
-	changes, err := detectChanges(projectDB, folderPath)
+	changes, err := scanner.DetectChanges(projectDB, folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect changes: %w", err)
 	}
 
-	status := &IndexStatus{
-		ToAdd:    make([]FileStatus, 0),
-		ToUpdate: make([]FileStatus, 0),
-		ToDelete: make([]FileStatus, 0),
+	status := &scanner.IndexStatus{
+		ToAdd:    make([]scanner.FileStatus, 0),
+		ToUpdate: make([]scanner.FileStatus, 0),
+		ToDelete: make([]scanner.FileStatus, 0),
 	}
 
 	// Populate ToAdd
@@ -392,9 +399,9 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 		if err != nil {
 			continue
 		}
-		status.ToAdd = append(status.ToAdd, FileStatus{
+		status.ToAdd = append(status.ToAdd, scanner.FileStatus{
 			Path:       path,
-			FileType:   getFileType(path),
+			FileType:   scanner.GetFileTypeFromPath(path),
 			Size:       info.Size(),
 			ModifiedAt: info.ModTime(),
 			Reason:     "new",
@@ -407,9 +414,9 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 		if err != nil {
 			continue
 		}
-		status.ToUpdate = append(status.ToUpdate, FileStatus{
+		status.ToUpdate = append(status.ToUpdate, scanner.FileStatus{
 			Path:       path,
-			FileType:   getFileType(path),
+			FileType:   scanner.GetFileTypeFromPath(path),
 			Size:       info.Size(),
 			ModifiedAt: info.ModTime(),
 			Reason:     "modified",
@@ -422,7 +429,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 		if err != nil {
 			continue
 		}
-		status.ToDelete = append(status.ToDelete, FileStatus{
+		status.ToDelete = append(status.ToDelete, scanner.FileStatus{
 			Path:       path,
 			FileType:   file.FileType,
 			Size:       file.Size,
@@ -440,266 +447,4 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*IndexStatus, error)
 	status.UpToDate = status.Total - len(changes.ToUpdate) - len(changes.ToDelete)
 
 	return status, nil
-}
-
-// Helper functions
-
-func scanFolder(root string) ([]string, error) {
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasPrefix(d.Name(), ".") || !isTextFile(path) {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	return files, err
-}
-
-func isTextFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	textExts := map[string]bool{
-		".txt": true, ".md": true, ".go": true, ".py": true, ".js": true, ".ts": true,
-		".tsx": true, ".jsx": true, ".java": true, ".c": true, ".cpp": true, ".h": true,
-		".rs": true, ".rb": true, ".php": true, ".cs": true, ".swift": true,
-		".html": true, ".css": true, ".scss": true, ".yaml": true, ".yml": true,
-		".toml": true, ".sh": true, ".proto": true, ".graphql": true,
-		".pdf": true, // PDF support
-	}
-	return textExts[ext]
-}
-
-func generateFileID(path string) string {
-	hash := md5.Sum([]byte(path))
-	return hex.EncodeToString(hash[:])
-}
-
-func generateChunkID(fileID string, chunkIndex int) string {
-	source := fmt.Sprintf("%s:chunk:%d", fileID, chunkIndex)
-	hash := md5.Sum([]byte(source))
-	return hex.EncodeToString(hash[:])
-}
-
-func getFileType(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == "" {
-		return "unknown"
-	}
-	return ext[1:]
-}
-
-// processPDFFileNew processes a PDF file and returns chunks using the new schema
-func processPDFFileNew(file db.File) ([]db.Chunk, []string, error) {
-	// Extract PDF text and metadata
-	pdfProc := processor.NewPDFProcessor()
-	pages, _, err := pdfProc.ExtractText(file.Path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
-	}
-
-	// Check if PDF has no text
-	hasText := false
-	for _, page := range pages {
-		if strings.TrimSpace(page.Text) != "" {
-			hasText = true
-			break
-		}
-	}
-
-	if !hasText {
-		return nil, nil, fmt.Errorf("skipping image-only PDF")
-	}
-
-	// Chunk the PDF
-	pdfChunker := processor.NewPDFChunker(processor.ChunkerConfig{
-		ChunkSize:   300,
-		OverlapSize: 10,
-	})
-
-	chunks, err := pdfChunker.ChunkPDFPages(pages, nil, file.Path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
-	}
-
-	// Convert to db.Chunk format
-	var dbChunks []db.Chunk
-	var contents []string
-
-	for i, chunk := range chunks {
-		// Extract page numbers from metadata if available
-		var pageNumbers []int
-		if chunk.Metadata != nil {
-			if pages, ok := chunk.Metadata["page_numbers"].([]int); ok {
-				pageNumbers = pages
-			} else if pageNum, ok := chunk.Metadata["page_number"].(int); ok {
-				pageNumbers = []int{pageNum}
-			}
-		}
-
-		dbChunk := db.Chunk{
-			ChunkID:     generateChunkID(file.FileID, i),
-			FileID:      file.FileID,
-			FilePath:    file.Path,     // Denormalized
-			FileType:    file.FileType, // Denormalized
-			ChunkIndex:  i,
-			TotalChunks: len(chunks),
-			Content:     chunk.Content,
-			PageNumbers: pageNumbers,
-		}
-
-		dbChunks = append(dbChunks, dbChunk)
-		contents = append(contents, chunk.Content)
-	}
-
-	return dbChunks, contents, nil
-}
-
-// processTextFileNew processes a text file and returns chunks using the new schema
-func processTextFileNew(file db.File, content string) ([]db.Chunk, []string, error) {
-	// Estimate tokens
-	estimatedTokens := processor.EstimateTokens(content)
-
-	var dbChunks []db.Chunk
-	var contents []string
-
-	if estimatedTokens > 1000 {
-		// Chunk large text files
-		chunker := processor.NewChunker(processor.ChunkerConfig{
-			ChunkSize:   300,
-			OverlapSize: 10,
-		})
-
-		chunks, err := chunker.ChunkByTokens(content, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to chunk text: %w", err)
-		}
-
-		for i, chunk := range chunks {
-			dbChunk := db.Chunk{
-				ChunkID:     generateChunkID(file.FileID, i),
-				FileID:      file.FileID,
-				FilePath:    file.Path,     // Denormalized
-				FileType:    file.FileType, // Denormalized
-				ChunkIndex:  i,
-				TotalChunks: len(chunks),
-				Content:     chunk.Content,
-				PageNumbers: []int{}, // Text files don't have pages
-			}
-
-			dbChunks = append(dbChunks, dbChunk)
-			contents = append(contents, chunk.Content)
-		}
-	} else {
-		// Small files: keep as single chunk
-		dbChunk := db.Chunk{
-			ChunkID:     generateChunkID(file.FileID, 0),
-			FileID:      file.FileID,
-			FilePath:    file.Path,     // Denormalized
-			FileType:    file.FileType, // Denormalized
-			ChunkIndex:  0,
-			TotalChunks: 1,
-			Content:     content,
-			PageNumbers: []int{},
-		}
-
-		dbChunks = append(dbChunks, dbChunk)
-		contents = append(contents, content)
-	}
-
-	return dbChunks, contents, nil
-}
-
-// DetectChanges compares filesystem state with database state to identify changes
-func detectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, error) {
-	// Get all files from database
-	dbFiles, err := projectDB.GetAllFiles()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get files from database: %w", err)
-	}
-
-	// Build map of database files by path
-	dbFileMap := make(map[string]*db.File)
-	for i := range dbFiles {
-		dbFileMap[dbFiles[i].Path] = &dbFiles[i]
-	}
-
-	// Scan filesystem
-	fsFiles, err := scanFolder(folderPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan folder: %w", err)
-	}
-
-	changes := &ChangeSet{
-		ToAdd:    []string{},
-		ToUpdate: []string{},
-		ToDelete: []string{},
-	}
-
-	// Track which files we've seen in filesystem
-	seenInFS := make(map[string]bool)
-
-	// Check each filesystem file
-	for _, fsPath := range fsFiles {
-		seenInFS[fsPath] = true
-
-		// Normalize path to absolute
-		absPath, err := filepath.Abs(fsPath)
-		if err != nil {
-			continue
-		}
-
-		dbFile, exists := dbFileMap[absPath]
-		if !exists {
-			// New file
-			changes.ToAdd = append(changes.ToAdd, absPath)
-			continue
-		}
-
-		// Check if file changed (compare size first, then hash if needed)
-		info, err := os.Stat(absPath)
-		if err != nil {
-			// File might have been deleted between scan and stat
-			continue
-		}
-
-		// Quick check: size changed
-		if info.Size() != dbFile.Size {
-			changes.ToUpdate = append(changes.ToUpdate, absPath)
-			continue
-		}
-
-		// Size same, check modification time
-		if !info.ModTime().Equal(dbFile.ModifiedAt) {
-			// mtime different, compute hash to verify content change
-			currentHash, err := processor.ComputeSHA256(absPath)
-			if err != nil {
-				// If we can't compute hash, assume changed
-				changes.ToUpdate = append(changes.ToUpdate, absPath)
-				continue
-			}
-
-			if currentHash != dbFile.FileHash {
-				changes.ToUpdate = append(changes.ToUpdate, absPath)
-			}
-		}
-	}
-
-	// Find deleted files (in DB but not in filesystem)
-	for path := range dbFileMap {
-		if !seenInFS[path] {
-			changes.ToDelete = append(changes.ToDelete, path)
-		}
-	}
-
-	return changes, nil
 }

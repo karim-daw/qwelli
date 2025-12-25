@@ -28,8 +28,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Start with defaults
 	cfg := config.DefaultConfig()
 
+	// Use Voyage AI as the provider
+	cfg.EmbeddingProvider = "voyage"
+	defaultModel := "voyage-multimodal-3"
+	defaultEndpoint := "https://api.voyageai.com/v1/multimodalembeddings"
+	cfg.EnableMultimodal = true
+
 	// Ask for API key
-	fmt.Print("Enter your OpenAI API key: ")
+	fmt.Print("Enter your Voyage AI API key: ")
 	apiKey, _ := reader.ReadString('\n')
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
@@ -37,7 +43,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	cfg.APIKey = apiKey
 
-	// Ask for model (with default)
+	// Ask for model (with default based on provider)
+	if defaultModel != "" {
+		cfg.Model = defaultModel
+	}
 	fmt.Printf("Enter embedding model [%s]: ", cfg.Model)
 	model, _ := reader.ReadString('\n')
 	model = strings.TrimSpace(model)
@@ -45,12 +54,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		cfg.Model = model
 	}
 
-	// Ask for endpoint (with default)
+	// Ask for endpoint (with default based on provider)
+	if defaultEndpoint != "" {
+		cfg.Endpoint = defaultEndpoint
+	}
 	fmt.Printf("Enter API endpoint [%s]: ", cfg.Endpoint)
 	endpoint, _ := reader.ReadString('\n')
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint != "" {
 		cfg.Endpoint = endpoint
+	}
+
+	// Ask about multimodal (default enabled for Voyage)
+	fmt.Print("Enable multimodal indexing (extract images from PDFs)? [Y/n]: ")
+	multimodalInput, _ := reader.ReadString('\n')
+	multimodalInput = strings.TrimSpace(strings.ToLower(multimodalInput))
+	if multimodalInput == "n" || multimodalInput == "no" {
+		cfg.EnableMultimodal = false
 	}
 
 	// Save configuration

@@ -7,33 +7,47 @@ import (
 	"strings"
 
 	"github.com/karim-daw/qwelli/internal/config"
-	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/spf13/cobra"
 )
 
 func NewSearchCmd() *cobra.Command {
 	var indexPath string
 	var topK int
+	var textOnly bool
+	var imagesOnly bool
+	var strategy string
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search indexed files",
-		Long:  "Perform semantic search across indexed files",
+		Long:  "Perform search across indexed files. Supports semantic, keyword (FTS), and hybrid strategies.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query := strings.Join(args, " ")
-			return runSearch(query, indexPath, topK)
+			// Clean query: remove any flag-like strings that might have been included
+			queryParts := []string{}
+			for _, arg := range args {
+				// Skip flag-like strings (they should have been parsed by Cobra already)
+				if strings.HasPrefix(arg, "--") {
+					continue
+				}
+				queryParts = append(queryParts, arg)
+			}
+			query := strings.Join(queryParts, " ")
+			return runSearch(query, indexPath, topK, textOnly, imagesOnly, strategy)
 		},
 	}
 
 	cmd.Flags().StringVarP(&indexPath, "index", "i", "", "Path to indexed folder (required)")
 	cmd.Flags().IntVarP(&topK, "top", "t", 5, "Number of results to return")
+	cmd.Flags().BoolVar(&textOnly, "text-only", false, "Search only text chunks")
+	cmd.Flags().BoolVar(&imagesOnly, "images-only", false, "Search only image chunks")
+	cmd.Flags().StringVar(&strategy, "strategy", "semantic", "Search strategy: semantic, keyword, or hybrid")
 	cmd.MarkFlagRequired("index")
 
 	return cmd
 }
 
-func runSearch(query, indexPath string, topK int) error {
+func runSearch(query, indexPath string, topK int, textOnly, imagesOnly bool, strategy string) error {
 	absPath, err := filepath.Abs(indexPath)
 	if err != nil {
 		return fmt.Errorf("invalid index path: %w", err)
@@ -46,80 +60,30 @@ func runSearch(query, indexPath string, topK int) error {
 
 	dbPath := filepath.Join(cfg.IndexDir, generateDBName(absPath))
 
-	fmt.Printf("🔍 Searching for: %s\n\n", query)
+	// Determine content type filter
+	contentType := ""
+	if textOnly && imagesOnly {
+		return fmt.Errorf("cannot use both --text-only and --images-only")
+	} else if textOnly {
+		contentType = "text"
+	} else if imagesOnly {
+		contentType = "image"
+	}
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint)
+	fmt.Printf("🔍 Searching for: %s", query)
+	if contentType != "" {
+		fmt.Printf(" (filter: %s only)", contentType)
+	}
+	if strategy != "semantic" {
+		fmt.Printf(" [strategy: %s]", strategy)
+	}
+	fmt.Printf("\n\n")
 
 	// check if the index exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return fmt.Errorf("index not found: %s", dbPath)
 	}
 
-	results, err := eng.Search(query, dbPath, topK)
-	if err != nil {
-		return fmt.Errorf("search failed: %w", err)
-	}
-
-	if len(results) == 0 {
-		fmt.Println("No results found.")
-		return nil
-	}
-
-	for i, result := range results {
-		fmt.Printf("Result %d:\n", i+1)
-		fmt.Printf("  📄 File: %s\n", result.FileName)
-
-		// Display page numbers if available (PDFs)
-		if pageNumbers, ok := result.TextMetadata["page_numbers"]; ok {
-			var pages []string
-			switch v := pageNumbers.(type) {
-			case []int:
-				for _, p := range v {
-					pages = append(pages, fmt.Sprintf("%d", p))
-				}
-			case []interface{}:
-				for _, p := range v {
-					pages = append(pages, fmt.Sprintf("%v", p))
-				}
-			}
-			if len(pages) > 0 {
-				fmt.Printf("  📖 Page(s): %s\n", strings.Join(pages, ", "))
-			}
-		}
-
-		// Display chunk info if available
-		if chunkIdx, ok := result.TextMetadata["chunk_index"]; ok {
-			var idx int
-			switch v := chunkIdx.(type) {
-			case int:
-				idx = v
-			case float64:
-				idx = int(v)
-			}
-			if totalChunks, ok := result.TextMetadata["total_chunks"]; ok {
-				var total int
-				switch v := totalChunks.(type) {
-				case int:
-					total = v
-				case float64:
-					total = int(v)
-				}
-				fmt.Printf("  🧩 Chunk: %d of %d\n", idx+1, total)
-			}
-		}
-
-		fmt.Printf("  📁 Path: %s\n", result.FilePath)
-		fmt.Printf("  📏 Distance: %.4f\n", result.Distance)
-		fmt.Printf("  📝 Preview: %s\n", truncate(result.Content, 500))
-		fmt.Println()
-	}
-
-	return nil
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
+	// Use shared searchResults function
+	return searchResults(query, dbPath, topK, textOnly, imagesOnly, strategy, cfg)
 }

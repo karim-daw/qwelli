@@ -16,16 +16,17 @@ type Chunk struct {
 	ChunkID string
 	FileID  string
 
-	// DENORMALIZED: Hot path fields for fast search results
 	FilePath string // Duplicated from File.Path
 	FileType string // Duplicated from File.FileType
 
 	ChunkIndex  int
 	TotalChunks int
 	Content     string
-	StartToken  *int
-	EndToken    *int
 	PageNumbers []int
+
+	// Multimodal fields
+	ContentType string // "text" or "image"
+	ImageData   []byte // Base64-encoded image data (nullable)
 }
 
 type Embedding struct {
@@ -43,4 +44,6 @@ type SearchResult struct {
 	TotalChunks int
 	PageNumbers []int
 	Distance    float64
+	ContentType string // "text" or "image"
+	ImageData   []byte // Base64-encoded image data (nullable)
 }

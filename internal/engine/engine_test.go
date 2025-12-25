@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/processor"
+	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/scanner"
 )
 
 func TestDetectChanges(t *testing.T) {
@@ -51,7 +52,7 @@ func TestDetectChanges(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := detectChanges(pdb, tmpDir)
+	changes, err := scanner.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("detectChanges() error = %v", err)
 	}
@@ -110,7 +111,7 @@ func TestDetectChanges_ModifiedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := detectChanges(pdb, tmpDir)
+	changes, err := scanner.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
@@ -162,7 +163,7 @@ func TestDetectChanges_DeletedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := detectChanges(pdb, tmpDir)
+	changes, err := scanner.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
