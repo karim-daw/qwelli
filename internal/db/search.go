@@ -69,57 +69,79 @@ func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType string) ([]SearchResult, error) {
 	vecStr := vectorToString(query)
 
-	// Build WHERE clause for content type filtering
-	contentTypeFilter := ""
-	if contentType != "" {
-		contentTypeFilter = fmt.Sprintf(" AND c.content_type = '%s'", contentType)
-	}
+	// When filtering by content type, we need to filter BEFORE the ANN search
+	// to ensure we get results from the filtered set. Otherwise, if the filtered
+	// content type is rare (e.g., only 2 images out of 95 total), they might not
+	// be in the top candidates.
+	var queryStr string
+	var queryArgs []interface{}
 
-	// When filtering by content type, fetch more candidates to ensure we get enough results
-	// after filtering. Use a multiplier to account for the distribution of content types.
-	candidateLimit := k
 	if contentType != "" {
-		// Fetch 3x more candidates when filtering to ensure we get enough results
-		// This is a heuristic - in practice, the distribution might vary
-		candidateLimit = k * 3
-		if candidateLimit < 50 {
-			candidateLimit = 50 // Minimum candidates to fetch
-		}
-		if candidateLimit > 1000 {
-			candidateLimit = 1000 // Maximum candidates to avoid performance issues
-		}
-	}
-
-	// Optimized CTE query: avoid double distance calculation
-	// Join with chunks table to get denormalized fields (no second JOIN needed)
-	queryStr := fmt.Sprintf(`
-		WITH ranked_embeddings AS (
+		// Filter embeddings by content_type BEFORE doing ANN search
+		// This ensures we search only within the relevant content type
+		queryStr = fmt.Sprintf(`
+			WITH filtered_embeddings AS (
+				SELECT e.chunk_id, e.vector
+				FROM embeddings e
+				JOIN chunks c ON e.chunk_id = c.chunk_id
+				WHERE c.content_type = $1
+			),
+			ranked_embeddings AS (
+				SELECT
+					chunk_id,
+					array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
+				FROM filtered_embeddings
+				ORDER BY distance
+				LIMIT $2
+			)
 			SELECT
-				chunk_id,
-				array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
-			FROM embeddings
-			ORDER BY distance
-			LIMIT ?
-		)
-		SELECT
-			c.chunk_id,
-			c.file_path,
-			c.file_type,
-			c.content,
-			c.chunk_index,
-			c.total_chunks,
-			c.page_numbers,
-			c.content_type,
-			c.image_data,
-			r.distance
-		FROM ranked_embeddings r
-		JOIN chunks c ON r.chunk_id = c.chunk_id
-		WHERE 1=1%s
-		ORDER BY r.distance
-		LIMIT ?
-	`, vecStr, p.Dimension, contentTypeFilter)
+				c.chunk_id,
+				c.file_path,
+				c.file_type,
+				c.content,
+				c.chunk_index,
+				c.total_chunks,
+				c.page_numbers,
+				c.content_type,
+				c.image_data,
+				r.distance
+			FROM ranked_embeddings r
+			JOIN chunks c ON r.chunk_id = c.chunk_id
+			ORDER BY r.distance
+			LIMIT $3
+		`, vecStr, p.Dimension)
+		queryArgs = []interface{}{contentType, k * 10, k} // Fetch 10x candidates when filtering
+	} else {
+		// No filtering - search all embeddings
+		queryStr = fmt.Sprintf(`
+			WITH ranked_embeddings AS (
+				SELECT
+					chunk_id,
+					array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
+				FROM embeddings
+				ORDER BY distance
+				LIMIT $1
+			)
+			SELECT
+				c.chunk_id,
+				c.file_path,
+				c.file_type,
+				c.content,
+				c.chunk_index,
+				c.total_chunks,
+				c.page_numbers,
+				c.content_type,
+				c.image_data,
+				r.distance
+			FROM ranked_embeddings r
+			JOIN chunks c ON r.chunk_id = c.chunk_id
+			ORDER BY r.distance
+			LIMIT $2
+		`, vecStr, p.Dimension)
+		queryArgs = []interface{}{k, k}
+	}
 
-	rows, err := p.conn.Query(queryStr, candidateLimit, k)
+	rows, err := p.conn.Query(queryStr, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
