@@ -91,17 +91,16 @@ func (g *EmbeddingGenerator) generateMultimodalEmbeddings(chunks []db.Chunk) (ma
 		return nil, fmt.Errorf("no valid chunks to embed")
 	}
 
-	// Log batch composition for debugging
+	// Log batch composition only if images are present
 	imageCount := 0
-	textCount := 0
 	for _, inp := range multimodalInputs {
 		if inp.Type == "image" {
 			imageCount++
-		} else {
-			textCount++
 		}
 	}
-	log.Printf("  Batch contains %d text inputs and %d image inputs", textCount, imageCount)
+	if imageCount > 0 {
+		log.Printf("  Processing %d text and %d image inputs", len(multimodalInputs)-imageCount, imageCount)
+	}
 
 	// Generate embeddings
 	embeddings, err := g.embedder.EmbedMultimodal(multimodalInputs)
@@ -132,7 +131,6 @@ func (g *EmbeddingGenerator) generateTextEmbeddings(chunks []db.Chunk) (map[int]
 
 	for i, chunk := range chunks {
 		if chunk.Content == "" {
-			log.Printf("⚠️  Skipping text chunk %d: empty content", i)
 			continue
 		}
 		texts = append(texts, chunk.Content)
