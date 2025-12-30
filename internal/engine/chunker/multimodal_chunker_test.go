@@ -11,7 +11,10 @@ func TestNewMultimodalChunker(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 	if chunker == nil {
@@ -30,7 +33,10 @@ func TestMultimodalChunker_ChunkPDF_TextOnly(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -78,7 +84,10 @@ func TestMultimodalChunker_ChunkPDF_WithImages(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -178,7 +187,10 @@ func TestMultimodalChunker_ChunkPDF_ImageOnly(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	// Empty pages (image-only PDF)
@@ -239,7 +251,10 @@ func TestMultimodalChunker_ChunkPDF_Sequencing(t *testing.T) {
 		ChunkSize:   100, // Small chunks to create multiple text chunks
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	// Create a page with enough text to create multiple chunks
@@ -291,7 +306,10 @@ func TestMultimodalChunker_ImageDimensionFiltering(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -410,7 +428,10 @@ func TestMultimodalChunker_ImageDimensionFiltering_EdgeCases(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -484,7 +505,10 @@ func TestMultimodalChunker_EmptyPagesAndImages(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	chunks, err := chunker.ChunkPDF([]processor.PDFPage{}, []processor.PDFImage{}, nil, "test.pdf")
@@ -504,7 +528,10 @@ func TestMultimodalChunker_ManyImagesSamePage(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -557,7 +584,10 @@ func TestMultimodalChunker_ImageMetadata(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
@@ -632,7 +662,10 @@ func TestMultimodalChunker_SortingOrder(t *testing.T) {
 		ChunkSize:   300,
 		OverlapSize: 10,
 	})
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		t.Fatalf("Failed to create image extractor: %v", err)
+	}
 	chunker := NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	pages := []processor.PDFPage{
