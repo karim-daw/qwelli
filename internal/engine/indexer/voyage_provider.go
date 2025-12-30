@@ -45,7 +45,7 @@ type voyageInput struct {
 
 type voyageMultimodalRequest struct {
 	Model  string        `json:"model"`
-	Inputs []voyageInput `json:"inputs"`
+	Inputs []voyageInput `json:"input"`
 }
 
 type voyageMultimodalResponse struct {
@@ -146,14 +146,17 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 
 	// Create batches that respect Voyage API limits
 	batches := p.createMultimodalBatches(inputs)
-	log.Printf("  Split %d inputs into %d batch(es)", len(inputs), len(batches))
+	if len(batches) > 1 {
+		log.Printf("  Split %d inputs into %d batches", len(inputs), len(batches))
+	}
 
 	allEmbeddings := make([][]float32, 0, len(inputs))
 	totalAPICalls := 0
 
 	for batchIdx, batch := range batches {
-		log.Printf("  Processing batch %d/%d (%d inputs)...",
-			batchIdx+1, len(batches), len(batch))
+		if len(batches) > 1 {
+			log.Printf("  Processing batch %d/%d...", batchIdx+1, len(batches))
+		}
 
 		embeddings, err := p.callMultimodalAPI(batch)
 		if err != nil {
@@ -169,8 +172,10 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 		totalAPICalls++
 	}
 
-	log.Printf("⏱️  Generated %d embeddings in %d API call(s): %v (avg: %v per embedding)",
-		len(inputs), totalAPICalls, time.Since(start), time.Since(start)/time.Duration(len(inputs)))
+	if len(batches) > 1 || time.Since(start) > 2*time.Second {
+		log.Printf("⏱️  Generated %d embeddings in %d API call(s): %v",
+			len(inputs), totalAPICalls, time.Since(start))
+	}
 	return allEmbeddings, nil
 }
 
@@ -228,29 +233,20 @@ func (p *VoyageEmbeddingProvider) createMultimodalBatches(inputs []MultimodalInp
 		batches = append(batches, currentBatch)
 	}
 
-	// Log batch composition for debugging
-	if len(batches) > 0 {
-		log.Printf("  Created %d batch(es) with token counts:", len(batches))
+	// Log batch composition only if multiple batches
+	if len(batches) > 1 {
 		for i, batch := range batches {
-			batchTokens := 0
 			textCount := 0
 			imageCount := 0
 			for _, inp := range batch {
-				switch inp.Type {
-				case "text":
-					batchTokens += textutil.EstimateTokens(inp.Text)
+				if inp.Type == "text" {
 					textCount++
-				case "image":
-					if inp.ImagePixels > 0 {
-						batchTokens += (inp.ImagePixels + pixelsPerImageToken - 1) / pixelsPerImageToken
-					} else {
-						batchTokens += 1000
-					}
+				} else {
 					imageCount++
 				}
 			}
-			log.Printf("    Batch %d: %d inputs (%d text, %d images), ~%d tokens",
-				i+1, len(batch), textCount, imageCount, batchTokens)
+			log.Printf("  Batch %d: %d inputs (%d text, %d images)",
+				i+1, len(batch), textCount, imageCount)
 		}
 	}
 
@@ -267,6 +263,10 @@ func (p *VoyageEmbeddingProvider) callMultimodalAPI(inputs []MultimodalInput) ([
 		var contentItem voyageContentItem
 		switch input.Type {
 		case "text":
+			// Validate that text is not empty
+			if input.Text == "" {
+				return nil, fmt.Errorf("empty text input at index %d", i)
+			}
 			contentItem = voyageContentItem{
 				Type: "text",
 				Text: input.Text,
