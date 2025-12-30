@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"log"
 	"path/filepath"
 	"strings"
 
@@ -84,11 +83,9 @@ func ProcessPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
 	}
 
 	// Extract images
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
-	images, err := imageExtractor.ExtractImages(file.Path)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
 	if err != nil {
-		log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)", filepath.Base(file.Path), err)
-		images = []processor.PDFImage{}
+		return nil, nil, fmt.Errorf("failed to create image extractor: %w", err)
 	}
 
 	// Create multimodal chunker
@@ -99,7 +96,7 @@ func ProcessPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
 	multimodalChunker := chunker.NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	// Chunk PDF with multimodal support
-	multimodalChunks, err := multimodalChunker.ChunkPDF(pdfResult.Pages, images, pdfResult.Metadata, file.Path)
+	multimodalChunks, err := multimodalChunker.ChunkPDF(pdfResult.Pages, []processor.PDFImage{}, pdfResult.Metadata, file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}
