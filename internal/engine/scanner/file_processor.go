@@ -74,8 +74,11 @@ func GetFileTypeFromPath(path string) string {
 // ProcessPDFFileMultimodal processes a PDF file with multimodal support (text + images)
 func ProcessPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
 	// Extract PDF text and metadata
-	pdfProc := processor.NewPDFProcessor()
-	pages, metadata, err := pdfProc.ExtractText(file.Path)
+	pdfProc, err := processor.NewPDFProcessor(true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create PDF processor: %w", err)
+	}
+	pdfResult, err := pdfProc.ExtractText(file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
@@ -96,7 +99,7 @@ func ProcessPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
 	multimodalChunker := chunker.NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	// Chunk PDF with multimodal support
-	multimodalChunks, err := multimodalChunker.ChunkPDF(pages, images, metadata, file.Path)
+	multimodalChunks, err := multimodalChunker.ChunkPDF(pdfResult.Pages, images, pdfResult.Metadata, file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}
@@ -137,15 +140,18 @@ func ProcessPDFFileMultimodal(file db.File) ([]db.Chunk, []string, error) {
 // ProcessPDFFile processes a PDF file and returns chunks
 func ProcessPDFFile(file db.File) ([]db.Chunk, []string, error) {
 	// Extract PDF text and metadata
-	pdfProc := processor.NewPDFProcessor()
-	pages, _, err := pdfProc.ExtractText(file.Path)
+	pdfProc, err := processor.NewPDFProcessor(true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create PDF processor: %w", err)
+	}
+	pdfResult, err := pdfProc.ExtractText(file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
 
 	// Check if PDF has no text
 	hasText := false
-	for _, page := range pages {
+	for _, page := range pdfResult.Pages {
 		if strings.TrimSpace(page.Text) != "" {
 			hasText = true
 			break
@@ -162,7 +168,7 @@ func ProcessPDFFile(file db.File) ([]db.Chunk, []string, error) {
 		OverlapSize: 10,
 	})
 
-	chunks, err := pdfChunker.ChunkPDFPages(pages, nil, file.Path)
+	chunks, err := pdfChunker.ChunkPDFPages(pdfResult.Pages, nil, file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}

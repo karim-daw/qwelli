@@ -10,27 +10,27 @@ import (
 )
 
 // PDFMetadata contains metadata extracted from a PDF
-type PDFMetadata struct {
-	Title        string
-	Creator      string
-	CreationDate time.Time
-	ModDate      time.Time
-	PageCount    int
-}
+// type PDFMetadata struct {
+// 	Title        string
+// 	Creator      string
+// 	CreationDate time.Time
+// 	ModDate      time.Time
+// 	PageCount    int
+// }
 
-// PDFPage represents a single page from a PDF
-type PDFPage struct {
-	PageNumber int
-	Text       string
-}
+// // PDFPage represents a single page from a PDF
+// type PDFPage struct {
+// 	PageNumber int
+// 	Text       string
+// }
 
 // PDFProcessor handles PDF text extraction
-type PDFProcessor struct{}
+// type PDFProcessor struct{}
 
-// NewPDFProcessor creates a new PDF processor
-func NewPDFProcessor() *PDFProcessor {
-	return &PDFProcessor{}
-}
+// // NewPDFProcessor creates a new PDF processor
+// func NewPDFProcessor() *PDFProcessor {
+// 	return &PDFProcessor{}
+// }
 
 // ExtractText extracts text from all pages of a PDF file
 func (p *PDFProcessor) ExtractText(filePath string) ([]PDFPage, *PDFMetadata, error) {

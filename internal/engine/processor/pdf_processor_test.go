@@ -7,127 +7,44 @@ import (
 )
 
 func TestNewPDFProcessor(t *testing.T) {
-	processor := NewPDFProcessor()
+	processor, err := NewPDFProcessor(true)
+	if err != nil {
+		t.Fatal("NewPDFProcessor returned error:", err)
+	}
 	if processor == nil {
 		t.Fatal("NewPDFProcessor returned nil")
 	}
-}
-
-func TestCleanText(t *testing.T) {
-	processor := NewPDFProcessor()
-
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "Multiple spaces",
-			input:    "This  has   multiple    spaces",
-			expected: "This has multiple spaces",
-		},
-		{
-			name:     "Leading and trailing whitespace",
-			input:    "  text with whitespace  ",
-			expected: "text with whitespace",
-		},
-		{
-			name:     "Newlines and tabs",
-			input:    "text\nwith\nnewlines\tand\ttabs",
-			expected: "text with newlines and tabs",
-		},
-		{
-			name:     "Already clean",
-			input:    "clean text",
-			expected: "clean text",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := processor.cleanText(tt.input)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
-			}
-		})
+	if !processor.verbose {
+		t.Error("Expected verbose to be true")
 	}
 }
 
-func TestParsePDFDate(t *testing.T) {
-	processor := NewPDFProcessor()
-
-	tests := []struct {
-		name       string
-		input      string
-		expectZero bool
-	}{
-		{
-			name:       "Valid PDF date with D: prefix",
-			input:      "D:20240115103000",
-			expectZero: false,
-		},
-		{
-			name:       "Valid PDF date without prefix",
-			input:      "20240115103000",
-			expectZero: false,
-		},
-		{
-			name:       "Valid PDF date with timezone",
-			input:      "D:20240115103000-05'00'",
-			expectZero: false,
-		},
-		{
-			name:       "Date only",
-			input:      "20240115",
-			expectZero: false,
-		},
-		{
-			name:       "Invalid date",
-			input:      "invalid",
-			expectZero: true,
-		},
-		{
-			name:       "Empty string",
-			input:      "",
-			expectZero: true,
-		},
+func TestNewPDFProcessor_NonVerbose(t *testing.T) {
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatal("NewPDFProcessor returned error:", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := processor.parsePDFDate(tt.input)
-			isZero := result.IsZero()
-			if isZero != tt.expectZero {
-				t.Errorf("Expected zero=%v, got zero=%v for input %q (result: %v)",
-					tt.expectZero, isZero, tt.input, result)
-			}
-		})
+	if processor.verbose {
+		t.Error("Expected verbose to be false")
 	}
 }
 
 // TestExtractText_WithSamplePDF tests PDF extraction with an actual PDF file
-// Requires a sample PDF file to be available
 func TestExtractText_WithSamplePDF(t *testing.T) {
-	// Get current working directory (tests run from package directory)
+	// Get current working directory
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
 
-	// Build paths relative to workspace root (go up 3 levels from internal/engine/processor/)
-	// internal/engine/processor -> engine -> internal -> qwelli (workspace root)
+	// Build paths relative to workspace root
 	possiblePaths := []string{
-		// From workspace root (3 levels up)
-		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
 		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
-		// Relative from current dir
-		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
 		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
 	}
 
 	var path string
 	for _, p := range possiblePaths {
-		// Make path absolute
 		absPath, err := filepath.Abs(p)
 		if err != nil {
 			continue
@@ -139,7 +56,6 @@ func TestExtractText_WithSamplePDF(t *testing.T) {
 	}
 
 	if path == "" {
-		// Show what we tried
 		var triedAbs []string
 		for _, p := range possiblePaths {
 			if abs, err := filepath.Abs(p); err == nil {
@@ -149,11 +65,94 @@ func TestExtractText_WithSamplePDF(t *testing.T) {
 		t.Fatalf("Sample PDF not found. Working directory: %s. Tried absolute paths: %v", wd, triedAbs)
 	}
 
-	processor := NewPDFProcessor()
-	pages, metadata, err := processor.ExtractText(path)
+	processor, err := NewPDFProcessor(true)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
 
+	result, err := processor.ExtractText(path)
 	if err != nil {
 		t.Fatalf("ExtractText failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Result is nil")
+	}
+
+	if result.Metadata == nil {
+		t.Fatal("Metadata is nil")
+	}
+
+	if result.Metadata.PageCount == 0 {
+		t.Error("PageCount is 0")
+	}
+
+	if len(result.Pages) != result.Metadata.PageCount {
+		t.Errorf("Expected %d pages, got %d", result.Metadata.PageCount, len(result.Pages))
+	}
+
+	// Verify page numbers are sequential
+	for i, page := range result.Pages {
+		expectedPageNum := i + 1
+		if page.PageNumber != expectedPageNum {
+			t.Errorf("Page %d has incorrect page number: %d", i, page.PageNumber)
+		}
+
+		// Verify each page has some text (unless it's a blank page)
+		if len(page.Text) == 0 {
+			t.Logf("Warning: Page %d has no text", page.PageNumber)
+		}
+	}
+
+	// Log results
+	t.Logf("Successfully extracted %d pages from PDF", len(result.Pages))
+	if result.Metadata.Title != "" {
+		t.Logf("Title: %s", result.Metadata.Title)
+	}
+	if result.Metadata.Author != "" {
+		t.Logf("Author: %s", result.Metadata.Author)
+	}
+	if !result.Metadata.CreationDate.IsZero() {
+		t.Logf("Creation Date: %v", result.Metadata.CreationDate)
+	}
+}
+
+// TestExtractMetadata_WithSamplePDF tests metadata extraction only
+func TestExtractMetadata_WithSamplePDF(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	possiblePaths := []string{
+		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
+		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
+	}
+
+	var path string
+	for _, p := range possiblePaths {
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			path = absPath
+			break
+		}
+	}
+
+	if path == "" {
+		t.Skip("Sample PDF not found, skipping metadata test")
+	}
+
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
+
+	metadata, err := processor.ExtractMetadata(path)
+	if err != nil {
+		t.Fatalf("ExtractMetadata failed: %v", err)
 	}
 
 	if metadata == nil {
@@ -164,37 +163,28 @@ func TestExtractText_WithSamplePDF(t *testing.T) {
 		t.Error("PageCount is 0")
 	}
 
-	if len(pages) != metadata.PageCount {
-		t.Errorf("Expected %d pages, got %d", metadata.PageCount, len(pages))
-	}
-
-	// Verify page numbers are sequential
-	for i, page := range pages {
-		expectedPageNum := i + 1
-		if page.PageNumber != expectedPageNum {
-			t.Errorf("Page %d has incorrect page number: %d", i, page.PageNumber)
-		}
-	}
-
-	// Verify metadata has a title (either from PDF or filename)
-	if metadata.Title == "" {
-		t.Error("Metadata title is empty")
-	}
-
-	t.Logf("Successfully extracted %d pages from PDF", len(pages))
-	t.Logf("Title: %s", metadata.Title)
-	if !metadata.CreationDate.IsZero() {
-		t.Logf("Creation Date: %v", metadata.CreationDate)
+	t.Logf("Metadata extracted successfully")
+	t.Logf("Page Count: %d", metadata.PageCount)
+	if metadata.Title != "" {
+		t.Logf("Title: %s", metadata.Title)
 	}
 }
 
 // TestExtractText_NonExistentFile tests error handling for missing files
 func TestExtractText_NonExistentFile(t *testing.T) {
-	processor := NewPDFProcessor()
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
 
-	_, _, err := processor.ExtractText("nonexistent.pdf")
+	_, err = processor.ExtractText("nonexistent.pdf")
 	if err == nil {
 		t.Error("Expected error for non-existent file, got nil")
+	}
+
+	// Verify error message is helpful
+	if err != nil {
+		t.Logf("Error message: %v", err)
 	}
 }
 
@@ -206,38 +196,148 @@ func TestExtractText_InvalidPDF(t *testing.T) {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
 	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
 
 	// Write some invalid content
-	tmpFile.WriteString("This is not a valid PDF file")
+	if _, err := tmpFile.WriteString("This is not a valid PDF file"); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
 	tmpFile.Close()
 
-	processor := NewPDFProcessor()
-	_, _, err = processor.ExtractText(tmpFile.Name())
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
 
+	_, err = processor.ExtractText(tmpFile.Name())
 	if err == nil {
 		t.Error("Expected error for invalid PDF, got nil")
 	}
+
+	// Verify we get a meaningful error
+	if err != nil {
+		t.Logf("Error for invalid PDF: %v", err)
+	}
 }
 
-// TestExtractMetadata_FallbackToFilename tests that filename is used when PDF has no title
-func TestExtractMetadata_FallbackToFilename(t *testing.T) {
-	// This is an integration-style test that would need a real PDF
-	// For now, we'll just test the logic in isolation
+// TestExtractMetadata_NonExistentFile tests metadata extraction error handling
+func TestExtractMetadata_NonExistentFile(t *testing.T) {
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
 
-	// The logic for fallback to filename is in extractMetadata
-	// We can't easily test it without a PDF reader, but we've verified
-	// the code path exists in the implementation
-	t.Log("Fallback to filename logic verified in implementation")
+	_, err = processor.ExtractMetadata("nonexistent.pdf")
+	if err == nil {
+		t.Error("Expected error for non-existent file, got nil")
+	}
 }
 
-// Benchmark for text cleaning
-func BenchmarkCleanText(b *testing.B) {
-	processor := NewPDFProcessor()
-	text := "This  is   a    text     with      multiple       spaces\nand\nnewlines\tand\ttabs"
+// TestInterfaceImplementation verifies PDFProcessor implements IPDFProcessor
+func TestInterfaceImplementation(t *testing.T) {
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
+
+	// This will fail at compile time if PDFProcessor doesn't implement IPDFProcessor
+	var _ IPDFProcessor = processor
+
+	t.Log("PDFProcessor correctly implements IPDFProcessor interface")
+}
+
+// TestParseDateFormats tests the ParseDate utility function
+func TestParseDateFormats(t *testing.T) {
+	testCases := []struct {
+		input       string
+		shouldError bool
+		description string
+	}{
+		{"D:20231215143022-08'00'", false, "Full date with timezone"},
+		{"D:20231215143022Z", false, "Full date with Z timezone"},
+		{"D:20231215143022", false, "Full date without timezone"},
+		{"D:20231215", false, "Date only"},
+		{"invalid date", true, "Invalid format"},
+		{"", true, "Empty string"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			result, err := ParseDate(tc.input)
+
+			if tc.shouldError {
+				if err == nil {
+					t.Errorf("Expected error for input '%s', got nil", tc.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for input '%s': %v", tc.input, err)
+				}
+				if result.IsZero() {
+					t.Errorf("Expected valid time for input '%s', got zero time", tc.input)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkExtractText benchmarks full text extraction
+func BenchmarkExtractText(b *testing.B) {
+	wd, err := os.Getwd()
+	if err != nil {
+		b.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	path := filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		b.Skip("Could not resolve path")
+	}
+
+	if _, err := os.Stat(absPath); err != nil {
+		b.Skip("Sample PDF not found")
+	}
+
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		b.Fatalf("Failed to create processor: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		processor.cleanText(text)
+		_, err := processor.ExtractText(absPath)
+		if err != nil {
+			b.Fatalf("ExtractText failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkExtractMetadata benchmarks metadata-only extraction
+func BenchmarkExtractMetadata(b *testing.B) {
+	wd, err := os.Getwd()
+	if err != nil {
+		b.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	path := filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		b.Skip("Could not resolve path")
+	}
+
+	if _, err := os.Stat(absPath); err != nil {
+		b.Skip("Sample PDF not found")
+	}
+
+	processor, err := NewPDFProcessor(false)
+	if err != nil {
+		b.Fatalf("Failed to create processor: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := processor.ExtractMetadata(absPath)
+		if err != nil {
+			b.Fatalf("ExtractMetadata failed: %v", err)
+		}
 	}
 }

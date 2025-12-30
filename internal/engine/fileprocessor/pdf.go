@@ -36,8 +36,11 @@ func (p *PDFProcessor) Process(file db.File, options ProcessOptions) ([]db.Chunk
 // processMultimodal processes a PDF with multimodal support (text + images)
 func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) ([]db.Chunk, []string, error) {
 	// Extract PDF text and metadata
-	pdfProc := processor.NewPDFProcessor()
-	pages, metadata, err := pdfProc.ExtractText(file.Path)
+	pdfProc, err := processor.NewPDFProcessor(true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create PDF processor: %w", err)
+	}
+	pdfResult, err := pdfProc.ExtractText(file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
@@ -58,7 +61,7 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 	multimodalChunker := chunker.NewMultimodalChunker(pdfChunker, imageExtractor)
 
 	// Chunk PDF with multimodal support
-	multimodalChunks, err := multimodalChunker.ChunkPDF(pages, images, metadata, file.Path)
+	multimodalChunks, err := multimodalChunker.ChunkPDF(pdfResult.Pages, images, pdfResult.Metadata, file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}
@@ -96,15 +99,18 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 // processTextOnly processes a PDF with text only
 func (p *PDFProcessor) processTextOnly(file db.File, options ProcessOptions) ([]db.Chunk, []string, error) {
 	// Extract PDF text and metadata
-	pdfProc := processor.NewPDFProcessor()
-	pages, _, err := pdfProc.ExtractText(file.Path)
+	pdfProc, err := processor.NewPDFProcessor(true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create PDF processor: %w", err)
+	}
+	pdfResult, err := pdfProc.ExtractText(file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
 
 	// Check if PDF has no text
 	hasText := false
-	for _, page := range pages {
+	for _, page := range pdfResult.Pages {
 		if strings.TrimSpace(page.Text) != "" {
 			hasText = true
 			break
@@ -121,7 +127,7 @@ func (p *PDFProcessor) processTextOnly(file db.File, options ProcessOptions) ([]
 		OverlapSize: options.OverlapSize,
 	})
 
-	chunks, err := pdfChunker.ChunkPDFPages(pages, nil, file.Path)
+	chunks, err := pdfChunker.ChunkPDFPages(pdfResult.Pages, nil, file.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}
