@@ -46,7 +46,10 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 	}
 
 	// Extract images
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
+	imageExtractor, err := processor.NewImageExtractor(1024, 1024, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create image extractor: %w", err)
+	}
 	images, err := imageExtractor.ExtractImages(file.Path)
 	if err != nil {
 		log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)", filepath.Base(file.Path), err)
