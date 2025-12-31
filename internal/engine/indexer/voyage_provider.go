@@ -64,6 +64,33 @@ type voyageMultimodalResponse struct {
 	} `json:"usage"`
 }
 
+// isTimeoutError checks if an error is a timeout error
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return containsAny(errStr, []string{
+		"context deadline exceeded",
+		"Client.Timeout exceeded",
+		"timeout",
+		"timed out",
+	})
+}
+
+func containsAny(s string, substrs []string) bool {
+	for _, substr := range substrs {
+		if len(s) >= len(substr) {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // NewVoyageEmbeddingProvider creates a new Voyage AI embedding provider
 func NewVoyageEmbeddingProvider(apiKey, model, endpoint string) (*VoyageEmbeddingProvider, error) {
 	if apiKey == "" {
@@ -81,7 +108,7 @@ func NewVoyageEmbeddingProvider(apiKey, model, endpoint string) (*VoyageEmbeddin
 		model:    model,
 		endpoint: endpoint,
 		client: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 180 * time.Second, // Increased to 3 minutes for large batches
 		},
 	}
 
@@ -150,15 +177,28 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 
 	allEmbeddings := make([][]float32, 0, len(inputs))
 	totalAPICalls := 0
+	batchStartTime := time.Now()
 
 	for batchIdx, batch := range batches {
-		log.Printf("  Processing batch %d/%d (%d inputs)...",
-			batchIdx+1, len(batches), len(batch))
+		// Calculate estimated time remaining
+		var eta string
+		if batchIdx > 0 {
+			avgTimePerBatch := time.Since(batchStartTime) / time.Duration(batchIdx)
+			remainingBatches := len(batches) - batchIdx
+			estimatedRemaining := avgTimePerBatch * time.Duration(remainingBatches)
+			eta = fmt.Sprintf(" (ETA: %v)", estimatedRemaining.Round(time.Second))
+		}
 
+		log.Printf("  📦 Processing batch %d/%d (%d inputs)%s",
+			batchIdx+1, len(batches), len(batch), eta)
+
+		batchStart := time.Now()
 		embeddings, err := p.callMultimodalAPI(batch)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process batch %d: %w", batchIdx+1, err)
 		}
+
+		log.Printf("  ✓ Batch %d completed in %v", batchIdx+1, time.Since(batchStart).Round(time.Millisecond))
 
 		if len(embeddings) != len(batch) {
 			return nil, fmt.Errorf("batch %d: expected %d embeddings, got %d",
@@ -181,8 +221,8 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 // - Max 32,000 tokens per input
 // - Image tokens: 560 pixels = 1 token
 func (p *VoyageEmbeddingProvider) createMultimodalBatches(inputs []MultimodalInput) [][]MultimodalInput {
-	const maxInputsPerBatch = 1000
-	const maxTokensPerBatch = 320000
+	const maxInputsPerBatch = 50    // Reduced from 1000 to avoid timeouts
+	const maxTokensPerBatch = 50000 // Reduced from 320000 to avoid timeouts
 	const maxTokensPerInput = 32000
 	const pixelsPerImageToken = 560 // 560 pixels = 1 token for images
 
@@ -344,9 +384,30 @@ func (p *VoyageEmbeddingProvider) callMultimodalAPI(inputs []MultimodalInput) ([
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+	// Retry logic with exponential backoff for timeout errors
+	var resp *http.Response
+	maxRetries := 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			waitTime := time.Duration(attempt*attempt) * time.Second // 1s, 4s, 9s
+			log.Printf("  ⏳ Retry attempt %d/%d after %v (previous attempt timed out)", attempt, maxRetries, waitTime)
+			time.Sleep(waitTime)
+
+			// Recreate request body for retry
+			req.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+		}
+
+		resp, err = p.client.Do(req)
+		if err != nil {
+			// Check if it's a timeout error
+			if isTimeoutError(err) && attempt < maxRetries {
+				log.Printf("  ⚠️  Request timed out, will retry...")
+				continue
+			}
+			return nil, fmt.Errorf("API request failed: %w", err)
+		}
+		// Success, break out of retry loop
+		break
 	}
 	defer resp.Body.Close()
 
