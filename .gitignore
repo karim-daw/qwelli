@@ -44,3 +44,4 @@ internal/processor_v2/images/
 web/node_modules/
 web/dist/
 web/package-lock.json
+internal/server/web/dist
