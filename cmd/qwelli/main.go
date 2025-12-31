@@ -23,6 +23,7 @@ and helps you find what you're looking for with natural language queries.`,
 
 	// Add commands
 	rootCmd.AddCommand(cli.NewShellCmd())
+	rootCmd.AddCommand(cli.NewServeCmd())
 	rootCmd.AddCommand(cli.NewInitCmd())
 	rootCmd.AddCommand(cli.NewIndexCmd())
 	rootCmd.AddCommand(cli.NewSearchCmd())
