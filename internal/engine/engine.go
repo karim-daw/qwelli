@@ -22,6 +22,7 @@ type SearchResult struct {
 	Distance     float64
 	Content      string
 	TextMetadata map[string]interface{}
+	ImageData    []byte // Base64 encoded image data for image results
 }
 
 type Engine struct {
@@ -136,6 +137,8 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 
 	// Process files
 	var allChunks []db.Chunk
+	skippedFiles := 0
+	oneDriveSkipped := 0
 
 	for i, f := range filesToProcess {
 		if progressCallback != nil {
@@ -145,19 +148,31 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 		// Normalize path to absolute
 		absPath, err := filepath.Abs(f)
 		if err != nil {
+			skippedFiles++
 			continue
 		}
 
 		info, err := os.Stat(absPath)
 		if err != nil {
 			log.Printf("⚠️  Failed to stat file %s: %v", absPath, err)
+			skippedFiles++
 			continue
 		}
 
 		// Compute file hash
 		fileHash, err := processor.ComputeSHA256(absPath)
 		if err != nil {
-			log.Printf("⚠️  Failed to compute hash for %s: %v", absPath, err)
+			// Check if it's an OneDrive I/O error
+			if strings.Contains(err.Error(), "OneDrive placeholder") || strings.Contains(err.Error(), "input/output error") {
+				oneDriveSkipped++
+				if oneDriveSkipped <= 3 {
+					// Only show first 3 OneDrive errors to avoid spam
+					log.Printf("⚠️  Skipping OneDrive placeholder file (not downloaded): %s", filepath.Base(absPath))
+				}
+			} else {
+				log.Printf("⚠️  Failed to compute hash for %s: %v", absPath, err)
+			}
+			skippedFiles++
 			continue
 		}
 
@@ -218,16 +233,24 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 
 	// Generate embeddings for all chunks using EmbeddingGenerator
 	if len(allChunks) > 0 {
+		log.Printf("🔄 Generating embeddings for %d chunks...", len(allChunks))
+		embeddingStart := time.Now()
+
 		embeddingGen := NewEmbeddingGenerator(embedder, e.enableMultimodal)
 		embeddingMap, err := embeddingGen.GenerateEmbeddings(allChunks)
 		if err != nil {
 			return fmt.Errorf("failed to generate embeddings: %w", err)
 		}
 
+		log.Printf("✅ Generated %d embeddings in %v", len(embeddingMap), time.Since(embeddingStart))
+
 		// Store chunks and embeddings
+		log.Printf("💾 Storing chunks and embeddings in database...")
+		storeStart := time.Now()
 		if err := StoreChunksAndEmbeddings(projectDB, allChunks, embeddingMap); err != nil {
 			return fmt.Errorf("failed to store chunks and embeddings: %w", err)
 		}
+		log.Printf("✅ Stored in %v", time.Since(storeStart))
 	}
 
 	// Rebuild HNSW index if needed (after any embedding changes)
@@ -238,6 +261,15 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 			return fmt.Errorf("failed to rebuild HNSW index: %w", err)
 		}
 		log.Printf("✅ HNSW index rebuilt in %v", time.Since(indexStart))
+	}
+
+	// Print summary
+	successfulFiles := len(filesToProcess) - skippedFiles
+	log.Printf("📊 Indexing Summary: %d files processed successfully, %d files skipped", successfulFiles, skippedFiles)
+	if oneDriveSkipped > 0 {
+		log.Printf("💡 Note: %d OneDrive placeholder files were skipped (not downloaded locally)", oneDriveSkipped)
+		log.Printf("   To index these files, ensure they are downloaded in OneDrive settings:")
+		log.Printf("   Right-click folder → 'Always keep on this device'")
 	}
 
 	return nil
@@ -322,6 +354,7 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 			Distance:     r.Distance,
 			Content:      strings.TrimSpace(r.Content),
 			TextMetadata: metadata,
+			ImageData:    r.ImageData, // Include image data for previews
 		})
 	}
 	return out, nil
