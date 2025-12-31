@@ -47,22 +47,37 @@ QWELLI_EMBEDDING_MODEL=voyage-multimodal-3
 QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
 ```
 
-### 3. Build and Run (Windows)
+### 3. Build and Run
 
-```powershell
+#### CLI Mode
+
+```bash
 # Build the binary
-go build -o qwelli.exe ./cmd/qwelli
-
-# Run interactive shell
-.\qwelli.exe shell
+go build -o qwelli ./cmd/qwelli
 
 # Or use individual commands
-.\qwelli.exe init
-.\qwelli.exe index ./my-folder
-.\qwelli.exe search "query" --index ./my-folder
+./qwelli init
+./qwelli index ./my-folder
+./qwelli search "query" --index ./my-folder
+
+# Run interactive shell
+./qwelli shell
 ```
 
-**Important:** The `shell` command requires an interactive terminal. Always use the built binary (`.\qwelli.exe`) instead of `go run` for reliable operation, especially for the interactive shell.
+#### Web UI Mode
+
+```bash
+# Build with embedded web UI
+./build-with-ui.sh  # Linux/Mac
+build-with-ui.bat   # Windows
+
+# Start the web server
+./qwelli serve
+
+# Open browser to http://localhost:8080
+```
+
+**Important:** The `shell` command requires an interactive terminal. Always use the built binary (`./qwelli`) instead of `go run` for reliable operation, especially for the interactive shell.
 
 ## Usage
 
@@ -121,6 +136,19 @@ Interactive mode.
 ```bash
 qwelli shell
 ```
+
+#### `serve`
+
+Start web UI server.
+
+```bash
+qwelli serve
+qwelli serve --port 3000  # Custom port
+```
+
+Options:
+
+- `--port, -p` - Port number (default: 8080)
 
 ### Interactive Shell
 
