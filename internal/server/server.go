@@ -20,6 +20,7 @@ import (
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
 )
 
 //go:embed web/dist
@@ -75,6 +76,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/index/progress", s.handleIndexProgress)
 	mux.HandleFunc("/api/index/cancel", s.handleCancelIndex)
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
+	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
 	mux.HandleFunc("/api/index/delete", s.handleDeleteIndex)
 
 	// Serve static files from embedded filesystem
@@ -230,7 +232,7 @@ type SearchResultItem struct {
 	FileName     string                 `json:"fileName"`
 	ContentType  string                 `json:"contentType"`
 	Distance     float64                `json:"similarity"`
-	PageNumbers  []int                  `json:"pageNumbers,omitempty"`
+	PageNumbers  []int                  `json:"pageNumbers"`
 	ChunkIndex   int                    `json:"chunkIndex,omitempty"`
 	TotalChunks  int                    `json:"totalChunks,omitempty"`
 	FileSize     int64                  `json:"fileSize,omitempty"`
@@ -340,6 +342,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			imageDataStr = string(r.ImageData)
 		}
 
+		// Get page numbers - prefer direct field, fallback to metadata
+		pageNumbers := r.PageNumbers
+		if len(pageNumbers) == 0 {
+			pageNumbers = getPageNumbers(r.TextMetadata)
+		}
+
 		results[i] = SearchResultItem{
 			ChunkID:      r.FilePath, // Use filepath as unique ID for now
 			Content:      r.Content,
@@ -347,7 +355,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			FileName:     r.FileName,
 			ContentType:  getContentType(r.TextMetadata),
 			Distance:     r.Distance,
-			PageNumbers:  getPageNumbers(r.TextMetadata),
+			PageNumbers:  pageNumbers,
 			ChunkIndex:   getChunkIndex(r.TextMetadata),
 			TotalChunks:  getTotalChunks(r.TextMetadata),
 			FileSize:     fileSize,
@@ -380,9 +388,33 @@ func getContentType(metadata map[string]interface{}) string {
 
 // Helper to extract page_numbers from metadata
 func getPageNumbers(metadata map[string]interface{}) []int {
+	if metadata == nil {
+		return nil
+	}
+
+	// Try direct []int first
 	if pn, ok := metadata["page_numbers"].([]int); ok {
 		return pn
 	}
+
+	// Try []interface{} (common in JSON unmarshaling)
+	if pnIface, ok := metadata["page_numbers"]; ok {
+		if arr, ok := pnIface.([]interface{}); ok {
+			result := make([]int, 0, len(arr))
+			for _, v := range arr {
+				switch val := v.(type) {
+				case int:
+					result = append(result, val)
+				case int64:
+					result = append(result, int(val))
+				case float64:
+					result = append(result, int(val))
+				}
+			}
+			return result
+		}
+	}
+
 	return nil
 }
 
@@ -481,7 +513,8 @@ func (s *Server) handleCreateIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		FolderPath string `json:"folderPath"`
+		FolderPath  string `json:"folderPath"`
+		ContentType string `json:"contentType,omitempty"` // "both", "text", or "images"
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -536,6 +569,21 @@ func (s *Server) handleCreateIndex(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("Starting indexing of %s...", absPath)
 
+		// Set content type mode based on request
+		contentTypeMode := fileprocessor.ContentTypeBoth // Default
+		switch req.ContentType {
+		case "text":
+			contentTypeMode = fileprocessor.ContentTypeText
+			log.Printf("📝 Content type mode: text only")
+		case "images":
+			contentTypeMode = fileprocessor.ContentTypeImages
+			log.Printf("🖼️  Content type mode: images only")
+		case "both", "":
+			contentTypeMode = fileprocessor.ContentTypeBoth
+			log.Printf("📄 Content type mode: both text and images")
+		}
+		s.engine.SetContentTypeMode(contentTypeMode)
+
 		progressCallback := func(current, total int, filename string) {
 			// Check if cancelled
 			select {
@@ -549,7 +597,20 @@ func (s *Server) handleCreateIndex(w http.ResponseWriter, r *http.Request) {
 			s.broadcastProgress(absPath, msg)
 		}
 
-		err := s.engine.IndexFolder(absPath, dbPath, false, progressCallback)
+		phaseCallback := func(phase, message string, current, total int) {
+			// Check if cancelled
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			msg := fmt.Sprintf(`{"type":"phase","phase":"%s","message":"%s","current":%d,"total":%d}`,
+				phase, message, current, total)
+			s.broadcastProgress(absPath, msg)
+		}
+
+		err := s.engine.IndexFolder(ctx, absPath, dbPath, false, progressCallback, phaseCallback)
 
 		// Check if it was cancelled
 		if ctx.Err() == context.Canceled {
@@ -681,7 +742,20 @@ func (s *Server) handleUpdateIndex(w http.ResponseWriter, r *http.Request) {
 			s.broadcastProgress(req.IndexPath, msg)
 		}
 
-		err := s.engine.IndexFolder(req.IndexPath, dbPath, true, progressCallback)
+		phaseCallback := func(phase, message string, current, total int) {
+			// Check if cancelled
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			msg := fmt.Sprintf(`{"type":"phase","phase":"%s","message":"%s","current":%d,"total":%d}`,
+				phase, message, current, total)
+			s.broadcastProgress(req.IndexPath, msg)
+		}
+
+		err := s.engine.IndexFolder(ctx, req.IndexPath, dbPath, true, progressCallback, phaseCallback)
 
 		// Check if it was cancelled
 		if ctx.Err() == context.Canceled {
@@ -867,6 +941,93 @@ func (s *Server) handleOpenFolder(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"success": "Folder opened"})
+}
+
+// handleOpenFileLocation opens the file location in the system file explorer and selects the file
+func (s *Server) handleOpenFileLocation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Path string
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "Path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "File not found"})
+		return
+	}
+
+	// Open file location in system file explorer and select the file
+	var cmd *exec.Cmd
+	pathToOpen := req.Path
+
+	// Check if running in WSL
+	if runtime.GOOS == "linux" {
+		// Check if we're in WSL by looking for /mnt/c
+		if _, err := os.Stat("/mnt/c"); err == nil {
+			// Convert WSL path to Windows path if needed
+			if strings.HasPrefix(pathToOpen, "/mnt/") {
+				// Already a /mnt path, convert to Windows format
+				// /mnt/c/Users/... -> C:\Users\...
+				parts := strings.Split(pathToOpen, "/")
+				if len(parts) >= 3 {
+					drive := strings.ToUpper(parts[2])
+					windowsPath := drive + ":\\" + strings.Join(parts[3:], "\\")
+					pathToOpen = windowsPath
+				}
+			} else if strings.HasPrefix(pathToOpen, "/home/") {
+				// WSL home directory, need to get Windows equivalent
+				// Use wslpath to convert
+				out, err := exec.Command("wslpath", "-w", pathToOpen).Output()
+				if err == nil {
+					pathToOpen = strings.TrimSpace(string(out))
+				}
+			}
+			// Use explorer.exe from WSL with /select flag to select the file
+			cmd = exec.Command("/mnt/c/Windows/explorer.exe", "/select,", pathToOpen)
+		} else {
+			// Regular Linux, open parent directory
+			parentDir := filepath.Dir(pathToOpen)
+			cmd = exec.Command("xdg-open", parentDir)
+		}
+	} else if runtime.GOOS == "windows" {
+		// Windows: use explorer /select to select the file
+		cmd = exec.Command("explorer", "/select,"+pathToOpen)
+	} else if runtime.GOOS == "darwin" {
+		// macOS: use open -R to reveal the file
+		cmd = exec.Command("open", "-R", pathToOpen)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Unsupported operating system"})
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("Failed to open file location: %v (path: %s)", err, pathToOpen)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to open file location: %v", err)})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"success": "File location opened"})
 }
 
 // handleCancelIndex cancels an active indexing operation
