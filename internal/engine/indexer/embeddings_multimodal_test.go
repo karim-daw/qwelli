@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -145,7 +146,7 @@ func TestEmbedder_EmbedMultimodal(t *testing.T) {
 		{Type: "image", ImageBase64: "base64data"},
 	}
 
-	embeddings, err := embedder.EmbedMultimodal(inputs)
+	embeddings, err := embedder.EmbedMultimodal(context.Background(), inputs, nil)
 	if err != nil {
 		t.Fatalf("EmbedMultimodal() error = %v", err)
 	}
@@ -162,7 +163,7 @@ func TestVoyageEmbeddingProvider_EmptyInputs(t *testing.T) {
 	}
 
 	// Test empty batch
-	embeddings, err := provider.EmbedBatch([]string{})
+	embeddings, err := provider.EmbedBatch(context.Background(), []string{}, nil)
 	if err != nil {
 		t.Fatalf("EmbedBatch() with empty input error = %v", err)
 	}
@@ -171,7 +172,7 @@ func TestVoyageEmbeddingProvider_EmptyInputs(t *testing.T) {
 	}
 
 	// Test empty multimodal
-	multimodalEmbeddings, err := provider.EmbedMultimodal([]MultimodalInput{})
+	multimodalEmbeddings, err := provider.EmbedMultimodal(context.Background(), []MultimodalInput{}, nil)
 	if err != nil {
 		t.Fatalf("EmbedMultimodal() with empty input error = %v", err)
 	}
@@ -224,7 +225,7 @@ func TestVoyageEmbeddingProvider_Batching(t *testing.T) {
 		texts[i] = "test text"
 	}
 
-	embeddings, err := provider.EmbedBatch(texts)
+	embeddings, err := provider.EmbedBatch(context.Background(), texts, nil)
 	if err != nil {
 		t.Fatalf("EmbedBatch() error = %v", err)
 	}
