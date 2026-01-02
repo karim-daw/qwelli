@@ -21,6 +21,7 @@ import (
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
+	"github.com/karim-daw/qwelli/internal/engine/reranker"
 )
 
 //go:embed web/dist
@@ -35,6 +36,7 @@ type SearchCacheEntry struct {
 type Server struct {
 	config          *config.Config
 	engine          *engine.Engine
+	reranker        reranker.Provider            // Reranker for search results
 	port            int
 	progressClients map[string][]chan string // indexPath -> clients listening for progress
 	progressMutex   sync.RWMutex
@@ -47,9 +49,24 @@ type Server struct {
 
 func NewServer(cfg *config.Config, port int) *Server {
 	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
+
+	// Initialize reranker if enabled
+	var rerankerProvider reranker.Provider
+	if cfg.EnableReranker {
+		if cfg.RerankProvider == "voyage" || cfg.RerankProvider == "" {
+			voyageReranker, err := reranker.NewVoyageProvider(cfg.APIKey, cfg.RerankModel, cfg.RerankEndpoint)
+			if err != nil {
+				log.Printf("⚠️  Failed to initialize reranker: %v (continuing without reranking)", err)
+			} else {
+				rerankerProvider = voyageReranker
+			}
+		}
+	}
+
 	s := &Server{
 		config:          cfg,
 		engine:          eng,
+		reranker:        rerankerProvider,
 		port:            port,
 		progressClients: make(map[string][]chan string),
 		searchCache:     make(map[string]*SearchCacheEntry),
@@ -92,6 +109,9 @@ func (s *Server) Start() error {
 	log.Printf("🚀 Server starting on http://localhost%s\n", addr)
 	log.Printf("📂 Index directory: %s\n", s.config.IndexDir)
 	log.Printf("🤖 Model: %s\n", s.config.Model)
+	if s.reranker != nil {
+		log.Printf("🔄 Reranker: enabled (%s)\n", s.reranker.Name())
+	}
 
 	return http.ListenAndServe(addr, s.corsMiddleware(mux))
 }
@@ -323,6 +343,42 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Search failed: %v", err)})
 		return
+	}
+
+	// Apply reranking if enabled
+	if s.reranker != nil && len(engineResults) > 0 {
+		// Convert engine.SearchResult to reranker.SearchResult
+		rerankInput := make([]reranker.SearchResult, len(engineResults))
+		for i, r := range engineResults {
+			rerankInput[i] = reranker.SearchResult{
+				FilePath:     r.FilePath,
+				FileName:     r.FileName,
+				Distance:     r.Distance,
+				Content:      r.Content,
+				TextMetadata: r.TextMetadata,
+				ImageData:    r.ImageData,
+				PageNumbers:  r.PageNumbers,
+			}
+		}
+
+		rerankedResults, err := s.reranker.Rerank(r.Context(), query, rerankInput)
+		if err != nil {
+			// Log error but continue with original results
+			log.Printf("⚠️  Reranking failed: %v (using original results)", err)
+		} else {
+			// Convert back to engine.SearchResult
+			for i, rr := range rerankedResults {
+				engineResults[i].FilePath = rr.FilePath
+				engineResults[i].FileName = rr.FileName
+				engineResults[i].Distance = rr.Distance
+				engineResults[i].Content = rr.Content
+				engineResults[i].TextMetadata = rr.TextMetadata
+				engineResults[i].ImageData = rr.ImageData
+				engineResults[i].PageNumbers = rr.PageNumbers
+			}
+			// Resize if reranker returned fewer results
+			engineResults = engineResults[:len(rerankedResults)]
+		}
 	}
 
 	// Convert engine.SearchResult to API response format
