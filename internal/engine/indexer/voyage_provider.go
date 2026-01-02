@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,7 +119,7 @@ func NewVoyageEmbeddingProvider(apiKey, model, endpoint string) (*VoyageEmbeddin
 
 // Embed generates an embedding for a single text
 func (p *VoyageEmbeddingProvider) Embed(text string) ([]float32, error) {
-	embeddings, err := p.EmbedBatch([]string{text})
+	embeddings, err := p.EmbedBatch(context.Background(), []string{text}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +130,7 @@ func (p *VoyageEmbeddingProvider) Embed(text string) ([]float32, error) {
 }
 
 // EmbedBatch generates embeddings for multiple texts
-func (p *VoyageEmbeddingProvider) EmbedBatch(texts []string) ([][]float32, error) {
+func (p *VoyageEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string, progressCallback func(current, total int)) ([][]float32, error) {
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
@@ -143,17 +144,17 @@ func (p *VoyageEmbeddingProvider) EmbedBatch(texts []string) ([][]float32, error
 		}
 	}
 
-	return p.EmbedMultimodal(inputs)
+	return p.EmbedMultimodal(ctx, inputs, progressCallback)
 }
 
 // EmbedImage generates an embedding for a single image (base64-encoded)
 func (p *VoyageEmbeddingProvider) EmbedImage(imageBase64 string) ([]float32, error) {
-	embeddings, err := p.EmbedMultimodal([]MultimodalInput{
+	embeddings, err := p.EmbedMultimodal(context.Background(), []MultimodalInput{
 		{
 			Type:        "image",
 			ImageBase64: imageBase64,
 		},
-	})
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +165,7 @@ func (p *VoyageEmbeddingProvider) EmbedImage(imageBase64 string) ([]float32, err
 }
 
 // EmbedMultimodal generates embeddings for mixed text and image inputs
-func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][]float32, error) {
+func (p *VoyageEmbeddingProvider) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, progressCallback func(current, total int)) ([][]float32, error) {
 	start := time.Now()
 
 	if len(inputs) == 0 {
@@ -178,8 +179,17 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 	allEmbeddings := make([][]float32, 0, len(inputs))
 	totalAPICalls := 0
 	batchStartTime := time.Now()
+	totalInputs := len(inputs)
+	processedInputs := 0
 
 	for batchIdx, batch := range batches {
+		// Check for cancellation before processing each batch
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		// Calculate estimated time remaining
 		var eta string
 		if batchIdx > 0 {
@@ -195,6 +205,12 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 		batchStart := time.Now()
 		embeddings, err := p.callMultimodalAPI(batch)
 		if err != nil {
+			// Check if cancelled during API call
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
 			return nil, fmt.Errorf("failed to process batch %d: %w", batchIdx+1, err)
 		}
 
@@ -207,6 +223,12 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 
 		allEmbeddings = append(allEmbeddings, embeddings...)
 		totalAPICalls++
+		processedInputs += len(batch)
+
+		// Report progress
+		if progressCallback != nil {
+			progressCallback(processedInputs, totalInputs)
+		}
 	}
 
 	log.Printf("⏱️  Generated %d embeddings in %d API call(s): %v (avg: %v per embedding)",
@@ -221,8 +243,8 @@ func (p *VoyageEmbeddingProvider) EmbedMultimodal(inputs []MultimodalInput) ([][
 // - Max 32,000 tokens per input
 // - Image tokens: 560 pixels = 1 token
 func (p *VoyageEmbeddingProvider) createMultimodalBatches(inputs []MultimodalInput) [][]MultimodalInput {
-	const maxInputsPerBatch = 50    // Reduced from 1000 to avoid timeouts
-	const maxTokensPerBatch = 50000 // Reduced from 320000 to avoid timeouts
+	const maxInputsPerBatch = 200    // Increased from 50 to improve throughput (API max is 1000)
+	const maxTokensPerBatch = 200000 // Increased from 50000 (API max is 320000)
 	const maxTokensPerInput = 32000
 	const pixelsPerImageToken = 560 // 560 pixels = 1 token for images
 
