@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,7 +108,7 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 	var lastProgress string
 
 	var textChunks, imageChunks int
-	err = eng.IndexFolder(absPath, dbPath, incremental, func(current, total int, filename string) {
+	err = eng.IndexFolder(context.Background(), absPath, dbPath, incremental, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
 		if enableMultimodal {
 			progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)
