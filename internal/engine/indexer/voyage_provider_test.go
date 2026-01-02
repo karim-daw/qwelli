@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -179,7 +180,7 @@ func TestVoyageEmbeddingProvider_EmbedBatch(t *testing.T) {
 	}
 
 	texts := []string{"text 1", "text 2", "text 3"}
-	embeddings, err := provider.EmbedBatch(texts)
+	embeddings, err := provider.EmbedBatch(context.Background(), texts, nil)
 	if err != nil {
 		t.Fatalf("EmbedBatch() error = %v", err)
 	}
@@ -320,7 +321,7 @@ func TestVoyageEmbeddingProvider_EmbedMultimodal(t *testing.T) {
 		{Type: "text", Text: "Second text"},
 	}
 
-	embeddings, err := provider.EmbedMultimodal(inputs)
+	embeddings, err := provider.EmbedMultimodal(context.Background(), inputs, nil)
 	if err != nil {
 		t.Fatalf("EmbedMultimodal() error = %v", err)
 	}
