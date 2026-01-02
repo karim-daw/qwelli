@@ -3,6 +3,7 @@ package chunker
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 
 	"github.com/karim-daw/qwelli/internal/engine/processor"
@@ -36,6 +37,13 @@ func (m *MultimodalChunker) ChunkPDF(pages []processor.PDFPage, images []process
 	textChunks, err := pdfStrategy.Chunkify(pages, m.pdfChunker.config, make(map[string]interface{}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to chunk PDF text: %w", err)
+	}
+
+	// Debug: check if text chunks have page numbers
+	for i, tc := range textChunks {
+		if len(tc.PageNumbers) == 0 {
+			log.Printf("⚠️  Text chunk %d from %s has NO page numbers", i, filepath.Base(filePath))
+		}
 	}
 
 	// Text chunks are already in the unified Chunk format, just add them
