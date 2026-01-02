@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,7 @@ func NewImageExtractor(maxWidth, maxHeight int) *ImageExtractor {
 }
 
 // ExtractImages extracts all images from a PDF file
+// This method extracts all images at once - page numbers are extracted from filenames
 func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 	// Create temporary directory for extracted images
 	tmpDir, err := os.MkdirTemp("", "qwelli-images-*")
@@ -109,6 +111,9 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 		// Extract page number from filename (pdfcpu format: page_X_img_Y.ext)
 		pageNumber := e.extractPageNumber(entry.Name())
 
+		// Debug: log filename and extracted page number
+		log.Printf("🖼️  Image filename: %s, extracted page number: %d", entry.Name(), pageNumber)
+
 		// Encode to base64
 		base64Data := base64.StdEncoding.EncodeToString(compressedData)
 
@@ -118,6 +123,85 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 			Width:      width,
 			Height:     height,
 			PageNumber: pageNumber,
+			Base64:     base64Data,
+		})
+	}
+
+	return images, nil
+}
+
+// ExtractImagesByPage extracts images from a specific page of a PDF
+// This ensures correct page number assignment
+func (e *ImageExtractor) ExtractImagesByPage(pdfPath string, pageNumber int) ([]PDFImage, error) {
+	// Create temporary directory for extracted images
+	tmpDir, err := os.MkdirTemp("", fmt.Sprintf("qwelli-images-page%d-*", pageNumber))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir) // Clean up temp directory
+
+	// Extract images from specific page using pdfcpu
+	conf := model.NewDefaultConfiguration()
+	// Create page selection for this specific page (pdfcpu uses 1-based indexing)
+	pageSelection := []string{fmt.Sprintf("%d", pageNumber)}
+	err = api.ExtractImagesFile(pdfPath, tmpDir, pageSelection, conf)
+	if err != nil {
+		// If extraction fails for this page, return empty slice (graceful degradation)
+		return []PDFImage{}, nil
+	}
+
+	// Read extracted image files
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temp directory: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return []PDFImage{}, nil
+	}
+
+	var images []PDFImage
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		imagePath := filepath.Join(tmpDir, entry.Name())
+		imageData, err := os.ReadFile(imagePath)
+		if err != nil {
+			// Log error but continue with other images
+			continue
+		}
+
+		// Parse image to get dimensions and format
+		img, format, err := e.parseImage(imageData)
+		if err != nil {
+			// Skip invalid images
+			continue
+		}
+
+		// Get dimensions
+		bounds := img.Bounds()
+		width := bounds.Dx()
+		height := bounds.Dy()
+
+		// Compress image if needed
+		compressedData, err := e.compressImage(imageData, format, width, height)
+		if err != nil {
+			// Use original if compression fails
+			compressedData = imageData
+		}
+
+		// Encode to base64
+		base64Data := base64.StdEncoding.EncodeToString(compressedData)
+
+		// Assign the known page number (from the function parameter)
+		images = append(images, PDFImage{
+			Data:       compressedData,
+			Format:     format,
+			Width:      width,
+			Height:     height,
+			PageNumber: pageNumber, // Use the page number we know
 			Base64:     base64Data,
 		})
 	}
