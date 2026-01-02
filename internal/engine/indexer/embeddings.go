@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -24,8 +25,9 @@ func (e *Embedder) Embed(text string) ([]float32, error) {
 }
 
 // EmbedBatch generates embeddings for multiple texts
-func (e *Embedder) EmbedBatch(texts []string) ([][]float32, error) {
-	return e.provider.EmbedBatch(texts)
+// progressCallback is called with (current, total) as batches are processed
+func (e *Embedder) EmbedBatch(ctx context.Context, texts []string, progressCallback func(current, total int)) ([][]float32, error) {
+	return e.provider.EmbedBatch(ctx, texts, progressCallback)
 }
 
 // IsMultimodal returns true if the provider supports multimodal embeddings
@@ -52,10 +54,11 @@ func (e *Embedder) EmbedImage(imageBase64 string) ([]float32, error) {
 
 // EmbedMultimodal generates embeddings for mixed text and image inputs
 // Returns an error if the provider doesn't support multimodal embeddings
-func (e *Embedder) EmbedMultimodal(inputs []MultimodalInput) ([][]float32, error) {
+// progressCallback is called with (current, total) as batches are processed
+func (e *Embedder) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, progressCallback func(current, total int)) ([][]float32, error) {
 	multimodalProvider, ok := e.provider.(MultimodalEmbeddingProvider)
 	if !ok {
 		return nil, fmt.Errorf("provider does not support multimodal embeddings")
 	}
-	return multimodalProvider.EmbedMultimodal(inputs)
+	return multimodalProvider.EmbedMultimodal(ctx, inputs, progressCallback)
 }
