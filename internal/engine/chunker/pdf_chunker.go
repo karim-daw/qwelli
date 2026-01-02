@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,6 +40,11 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 			continue
 		}
 
+		// Debug: check if page has valid page number
+		if page.PageNumber <= 0 {
+			log.Printf("⚠️  PDF chunker: Page has invalid PageNumber: %d (should be >= 1)", page.PageNumber)
+		}
+
 		pageTokens := textutil.EstimateTokens(page.Text)
 
 		// If page fits in one chunk, keep it as-is
@@ -50,6 +56,9 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 				ChunkIndex:  len(allChunks),
 				TotalChunks: 0,   // Will be set later
 				Metadata:    nil, // Will be set later
+			}
+			if page.PageNumber <= 0 {
+				log.Printf("⚠️  PDF chunker: Created chunk with invalid PageNumber: %d", page.PageNumber)
 			}
 			allChunks = append(allChunks, chunk)
 		} else {

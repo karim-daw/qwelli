@@ -16,7 +16,20 @@ import {
     Clock,
     HardDrive,
     Activity,
+    ZoomIn,
+    ZoomOut,
+    Download,
+    ChevronLeft,
+    ChevronRight as ChevronRightIcon,
 } from "lucide-react";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+// this is a comment
+// this is a comment
+
+// Configure PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface Index {
     name: string;
@@ -64,6 +77,17 @@ interface IndexProgress {
     indexPath: string;
 }
 
+interface RecentSearch {
+    query: string;
+    strategy: string;
+    contentFilter: string;
+    topK: number;
+    timestamp: number;
+    resultCount: number;
+    results: SearchResult[];
+    cacheStatus?: string;
+}
+
 function App() {
     const [indexes, setIndexes] = useState<Index[]>([]);
     const [selectedIndex, setSelectedIndex] = useState<string>("");
@@ -77,25 +101,183 @@ function App() {
     const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
     const [loadingStatus, setLoadingStatus] = useState(false);
     const [newIndexPath, setNewIndexPath] = useState("");
+    const [indexContentType, setIndexContentType] = useState<"both" | "text" | "images">("both");
     const [indexing, setIndexing] = useState(false);
     const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(
         null,
     );
     const [indexingComplete, setIndexingComplete] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
+    const [currentPhase, setCurrentPhase] = useState<string>("");
     const [selectedResult, setSelectedResult] = useState<SearchResult | null>(
         null,
     );
     const [showFullTextModal, setShowFullTextModal] = useState(false);
     const [cacheStatus, setCacheStatus] = useState<string | null>(null);
-
+    // this is a comment
     // Search settings
     const [strategy, setStrategy] = useState("semantic");
     const [topK, setTopK] = useState(10);
     const [contentFilter, setContentFilter] = useState("all");
 
+    // Recent searches
+    const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+    const MAX_RECENT_SEARCHES = 10;
+
+    // PDF preview
+    const [showPDFPreview, setShowPDFPreview] = useState(false);
+    const [pdfPreviewData, setPDFPreviewData] = useState<{
+        filePath: string;
+        initialPage: number;
+        fileName: string;
+    } | null>(null);
+    const [pdfNumPages, setPdfNumPages] = useState<number>(0);
+    const [pdfPageNumber, setPdfPageNumber] = useState(1);
+    const [pdfScale, setPdfScale] = useState(1.0);
+
+    // Update/sync progress
+    const [updating, setUpdating] = useState(false);
+    const [updateProgress, setUpdateProgress] = useState<IndexProgress | null>(
+        null,
+    );
+    const [updateComplete, setUpdateComplete] = useState(false);
+
+    // localStorage helper functions
+    const loadRecentSearches = (indexPath: string): RecentSearch[] => {
+        try {
+            const stored = localStorage.getItem("qwelli_recent_searches");
+            if (!stored) return [];
+
+            const allSearches: Record<string, RecentSearch[]> =
+                JSON.parse(stored);
+            return allSearches[indexPath] || [];
+        } catch (error) {
+            console.error("Failed to load recent searches:", error);
+            return [];
+        }
+    };
+
+    const saveRecentSearch = (indexPath: string, search: RecentSearch) => {
+        try {
+            const stored = localStorage.getItem("qwelli_recent_searches");
+            const allSearches: Record<string, RecentSearch[]> = stored
+                ? JSON.parse(stored)
+                : {};
+
+            // Get current searches for this index
+            const indexSearches = allSearches[indexPath] || [];
+
+            // Remove duplicate if same query exists
+            const filtered = indexSearches.filter(
+                (s) =>
+                    !(
+                        s.query === search.query &&
+                        s.strategy === search.strategy &&
+                        s.contentFilter === search.contentFilter &&
+                        s.topK === search.topK
+                    ),
+            );
+
+            // Add new search at the beginning
+            filtered.unshift(search);
+
+            // Keep only MAX_RECENT_SEARCHES
+            allSearches[indexPath] = filtered.slice(0, MAX_RECENT_SEARCHES);
+
+            localStorage.setItem(
+                "qwelli_recent_searches",
+                JSON.stringify(allSearches),
+            );
+            setRecentSearches(allSearches[indexPath]);
+        } catch (error) {
+            console.error("Failed to save recent search:", error);
+        }
+    };
+
+    const clearRecentSearches = (indexPath: string) => {
+        try {
+            const stored = localStorage.getItem("qwelli_recent_searches");
+            if (!stored) return;
+
+            const allSearches: Record<string, RecentSearch[]> =
+                JSON.parse(stored);
+            delete allSearches[indexPath];
+
+            localStorage.setItem(
+                "qwelli_recent_searches",
+                JSON.stringify(allSearches),
+            );
+            setRecentSearches([]);
+        } catch (error) {
+            console.error("Failed to clear recent searches:", error);
+        }
+    };
+
+    const loadCachedSearch = (search: RecentSearch) => {
+        // Load the search parameters
+        setQuery(search.query);
+        setStrategy(search.strategy);
+        setContentFilter(search.contentFilter);
+        setTopK(search.topK);
+
+        // Load the cached results directly
+        setResults(search.results);
+        setCacheStatus("LOCAL");
+    };
+
+    const formatTimestamp = (timestamp: number): string => {
+        const now = Date.now();
+        const diff = now - timestamp;
+
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+
+        if (minutes < 1) return "Just now";
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+
+        return new Date(timestamp).toLocaleDateString();
+    };
+
+    const openPDFPreview = (result: SearchResult) => {
+        const isPDF =
+            result.fileName?.toLowerCase().endsWith(".pdf") ||
+            result.filePath?.toLowerCase().endsWith(".pdf");
+        if (!isPDF) return;
+
+        setPDFPreviewData({
+            filePath: result.filePath,
+            initialPage: result.pageNumbers?.[0] || 1,
+            fileName: result.fileName || result.filePath,
+        });
+        setPdfPageNumber(result.pageNumbers?.[0] || 1);
+        setShowPDFPreview(true);
+    };
+
+    const closePDFPreview = () => {
+        setShowPDFPreview(false);
+        setPDFPreviewData(null);
+        setPdfNumPages(0);
+        setPdfPageNumber(1);
+        setPdfScale(1.0);
+    };
+
+    const onPDFLoadSuccess = ({ numPages }: { numPages: number }) => {
+        setPdfNumPages(numPages);
+    };
+
     useEffect(() => {
         fetchIndexes();
     }, []);
+
+    useEffect(() => {
+        if (selectedIndex) {
+            const recent = loadRecentSearches(selectedIndex);
+            setRecentSearches(recent);
+        }
+    }, [selectedIndex]);
 
     const fetchIndexes = async () => {
         try {
@@ -149,7 +331,33 @@ function App() {
             const cacheHeader = response.headers.get("X-Cache-Status");
             setCacheStatus(cacheHeader);
 
-            setResults(data.results || []);
+            const searchResults = data.results || [];
+            // Debug: log page numbers for PDFs
+            searchResults.forEach((r: SearchResult) => {
+                const isPDF = r.fileName?.toLowerCase().endsWith(".pdf") || 
+                             r.filePath?.toLowerCase().endsWith(".pdf");
+                if (isPDF) {
+                    console.log("PDF result:", {
+                        fileName: r.fileName,
+                        pageNumbers: r.pageNumbers,
+                        hasPageNumbers: r.pageNumbers && r.pageNumbers.length > 0,
+                        metadata: r.metadata
+                    });
+                }
+            });
+            setResults(searchResults);
+
+            // Save to recent searches with results
+            saveRecentSearch(selectedIndex, {
+                query,
+                strategy,
+                contentFilter,
+                topK,
+                timestamp: Date.now(),
+                resultCount: searchResults.length,
+                results: searchResults,
+                cacheStatus: cacheHeader || undefined,
+            });
         } catch (error) {
             console.error("Search failed:", error);
         } finally {
@@ -197,16 +405,21 @@ function App() {
                         file: data.file,
                         indexPath: convertedPath,
                     });
+                } else if (data.type === "phase") {
+                    setCurrentPhase(data.message || data.phase);
                 } else if (data.type === "complete") {
                     eventSource.close();
                     setIndexingComplete(true);
                     setIndexing(false);
+                    setCurrentPhase("");
                     fetchIndexes();
                 } else if (data.type === "cancelled") {
                     eventSource.close();
                     setIndexProgress(null);
                     setIndexing(false);
                     setIndexingComplete(false);
+                    setCancelling(false);
+                    setCurrentPhase("");
                     setShowNewIndexDialog(false);
                     setNewIndexPath("");
                 } else if (data.type === "error") {
@@ -214,6 +427,7 @@ function App() {
                     setIndexProgress(null);
                     setIndexing(false);
                     setIndexingComplete(false);
+                    setCurrentPhase("");
                     alert("Indexing error: " + data.message);
                 }
             };
@@ -228,7 +442,10 @@ function App() {
             const response = await fetch("/api/index/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ folderPath: convertedPath }),
+                body: JSON.stringify({ 
+                    folderPath: convertedPath,
+                    contentType: indexContentType 
+                }),
             });
 
             if (!response.ok) {
@@ -255,8 +472,9 @@ function App() {
     };
 
     const handleCancelIndexing = async () => {
-        if (!indexProgress) return;
+        if (!indexProgress || cancelling) return;
 
+        setCancelling(true);
         try {
             const response = await fetch("/api/index/cancel", {
                 method: "POST",
@@ -267,9 +485,12 @@ function App() {
             if (!response.ok) {
                 const data = await response.json();
                 alert("Failed to cancel: " + data.error);
+                setCancelling(false);
             }
+            // Note: setCancelling will be reset when the cancelled event is received
         } catch (error) {
             alert("Failed to cancel indexing: " + error);
+            setCancelling(false);
         }
     };
 
@@ -296,6 +517,7 @@ function App() {
                 if (selectedIndex === indexPath) {
                     setSelectedIndex("");
                     setResults([]);
+                    setQuery("");
                 }
             } else {
                 const data = await response.json();
@@ -320,6 +542,23 @@ function App() {
             }
         } catch (error) {
             alert("Failed to open folder: " + error);
+        }
+    };
+
+    const handleOpenFileLocation = async (filePath: string) => {
+        try {
+            const response = await fetch("/api/open-file-location", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: filePath }),
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                alert("Failed to open file location: " + data.error);
+            }
+        } catch (error) {
+            alert("Failed to open file location: " + error);
         }
     };
 
@@ -361,6 +600,7 @@ function App() {
                                     setSelectedIndex(index.path);
                                     setViewMode("search");
                                     setResults([]);
+                                    setQuery("");
                                 }}
                                 className={`w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors group ${
                                     selectedIndex === index.path
@@ -608,53 +848,172 @@ function App() {
                                             <button
                                                 onClick={async () => {
                                                     if (
-                                                        confirm(
+                                                        !confirm(
                                                             "Sync all changes? This will update the index with new, modified, and deleted files.",
                                                         )
                                                     ) {
-                                                        try {
-                                                            const response =
-                                                                await fetch(
-                                                                    "/api/index/update",
-                                                                    {
-                                                                        method: "POST",
-                                                                        headers:
-                                                                            {
-                                                                                "Content-Type":
-                                                                                    "application/json",
-                                                                            },
-                                                                        body: JSON.stringify(
-                                                                            {
-                                                                                indexPath:
-                                                                                    selectedIndex,
-                                                                            },
-                                                                        ),
+                                                        return;
+                                                    }
+
+                                                    setUpdating(true);
+                                                    setUpdateComplete(false);
+
+                                                    try {
+                                                        // Connect to SSE progress stream
+                                                        const eventSource =
+                                                            new EventSource(
+                                                                "/api/index/progress?path=" +
+                                                                    encodeURIComponent(
+                                                                        selectedIndex,
+                                                                    ),
+                                                            );
+
+                                                        eventSource.onmessage =
+                                                            (event) => {
+                                                                const data =
+                                                                    JSON.parse(
+                                                                        event.data,
+                                                                    );
+
+                                                                if (
+                                                                    data.type ===
+                                                                    "progress"
+                                                                ) {
+                                                                    setUpdateProgress(
+                                                                        {
+                                                                            current:
+                                                                                data.current,
+                                                                            total: data.total,
+                                                                            file: data.file,
+                                                                            indexPath:
+                                                                                selectedIndex,
+                                                                        },
+                                                                    );
+                                                                } else if (
+                                                                    data.type ===
+                                                                    "phase"
+                                                                ) {
+                                                                    setCurrentPhase(
+                                                                        data.message ||
+                                                                            data.phase,
+                                                                    );
+                                                                } else if (
+                                                                    data.type ===
+                                                                    "complete"
+                                                                ) {
+                                                                    eventSource.close();
+                                                                    setUpdateComplete(
+                                                                        true,
+                                                                    );
+                                                                    setUpdating(
+                                                                        false,
+                                                                    );
+                                                                    setCurrentPhase(
+                                                                        "",
+                                                                    );
+                                                                    // Refresh status to show updated state
+                                                                    fetchIndexStatus(
+                                                                        selectedIndex,
+                                                                    );
+                                                                } else if (
+                                                                    data.type ===
+                                                                    "cancelled"
+                                                                ) {
+                                                                    eventSource.close();
+                                                                    setUpdateProgress(
+                                                                        null,
+                                                                    );
+                                                                    setUpdating(
+                                                                        false,
+                                                                    );
+                                                                    setUpdateComplete(
+                                                                        false,
+                                                                    );
+                                                                    setCurrentPhase(
+                                                                        "",
+                                                                    );
+                                                                } else if (
+                                                                    data.type ===
+                                                                    "error"
+                                                                ) {
+                                                                    eventSource.close();
+                                                                    setUpdateProgress(
+                                                                        null,
+                                                                    );
+                                                                    setUpdating(
+                                                                        false,
+                                                                    );
+                                                                    setCurrentPhase(
+                                                                        "",
+                                                                    );
+                                                                    alert(
+                                                                        "Sync error: " +
+                                                                            data.message,
+                                                                    );
+                                                                }
+                                                            };
+
+                                                        eventSource.onerror =
+                                                            () => {
+                                                                eventSource.close();
+                                                                setUpdateProgress(
+                                                                    null,
+                                                                );
+                                                                setUpdating(
+                                                                    false,
+                                                                );
+                                                            };
+
+                                                        // Start the sync operation
+                                                        const response =
+                                                            await fetch(
+                                                                "/api/index/update",
+                                                                {
+                                                                    method: "POST",
+                                                                    headers: {
+                                                                        "Content-Type":
+                                                                            "application/json",
                                                                     },
-                                                                );
-                                                            if (response.ok) {
-                                                                alert(
-                                                                    "Index sync started in background. Refresh status in a few moments.",
-                                                                );
-                                                                setTimeout(
-                                                                    () =>
-                                                                        fetchIndexStatus(
-                                                                            selectedIndex,
-                                                                        ),
-                                                                    3000,
-                                                                );
-                                                            }
-                                                        } catch (error) {
+                                                                    body: JSON.stringify(
+                                                                        {
+                                                                            indexPath:
+                                                                                selectedIndex,
+                                                                        },
+                                                                    ),
+                                                                },
+                                                            );
+
+                                                        if (!response.ok) {
+                                                            const data =
+                                                                await response.json();
+                                                            eventSource.close();
+                                                            setUpdateProgress(
+                                                                null,
+                                                            );
+                                                            setUpdating(false);
                                                             alert(
-                                                                "Failed to sync: " +
-                                                                    error,
+                                                                "Error: " +
+                                                                    data.error,
                                                             );
                                                         }
+                                                    } catch (error) {
+                                                        setUpdateProgress(null);
+                                                        setUpdating(false);
+                                                        alert(
+                                                            "Failed to sync: " +
+                                                                error,
+                                                        );
                                                     }
                                                 }}
-                                                className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-md hover:opacity-90 text-sm font-medium"
+                                                disabled={updating}
+                                                className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-md hover:opacity-90 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                <RefreshCw className="w-4 h-4" />
-                                                Sync Changes
+                                                <RefreshCw
+                                                    className={`w-4 h-4 ${updating ? "animate-spin" : ""}`}
+                                                />
+                                                {updating
+                                                    ? "Syncing..."
+                                                    : "Sync Changes"}
                                             </button>
                                         )}
                                     </div>
@@ -804,7 +1163,8 @@ function App() {
                                         Found {results.length} result
                                         {results.length !== 1 ? "s" : ""}
                                     </div>
-                                    {cacheStatus === "HIT" && (
+                                    {(cacheStatus === "HIT" ||
+                                        cacheStatus === "LOCAL") && (
                                         <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded border border-green-500/20">
                                             <svg
                                                 className="w-3 h-3"
@@ -819,7 +1179,9 @@ function App() {
                                                     d="M13 10V3L4 14h7v7l9-11h-7z"
                                                 />
                                             </svg>
-                                            Cached
+                                            {cacheStatus === "LOCAL"
+                                                ? "Cached Locally"
+                                                : "Cached"}
                                         </div>
                                     )}
                                 </div>
@@ -841,28 +1203,46 @@ function App() {
                                                     {result.fileName ||
                                                         result.filePath}
                                                 </span>
-                                                {result.pageNumbers &&
-                                                    result.pageNumbers.length >
-                                                        0 && (
-                                                        <span className="text-xs flex-shrink-0 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 text-blue-400">
-                                                            Page{" "}
-                                                            {
-                                                                result
-                                                                    .pageNumbers[0]
-                                                            }
-                                                        </span>
-                                                    )}
-                                                {result.chunkIndex !==
-                                                    undefined &&
-                                                    result.totalChunks && (
-                                                        <span className="text-xs flex-shrink-0 text-gray-500">
-                                                            Chunk{" "}
-                                                            {result.chunkIndex +
-                                                                1}
-                                                            /
-                                                            {result.totalChunks}
-                                                        </span>
-                                                    )}
+                                                {(() => {
+                                                    const isPDF = (result.fileName?.toLowerCase().endsWith(".pdf") || 
+                                                                  result.filePath?.toLowerCase().endsWith(".pdf"));
+                                                    const hasPageNumbers = result.pageNumbers && 
+                                                                           Array.isArray(result.pageNumbers) && 
+                                                                           result.pageNumbers.length > 0;
+                                                    
+                                                    if (isPDF && hasPageNumbers && result.pageNumbers) {
+                                                        return (
+                                                            <button
+                                                                onClick={() =>
+                                                                    openPDFPreview(
+                                                                        result,
+                                                                    )
+                                                                }
+                                                                className="text-xs flex-shrink-0 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors cursor-pointer font-medium"
+                                                                title="Preview PDF at this page"
+                                                            >
+                                                                Page{" "}
+                                                                {result.pageNumbers[0]}
+                                                            </button>
+                                                        );
+                                                    }
+                                                    // Don't show chunk label for PDFs
+                                                    if (isPDF) {
+                                                        return null;
+                                                    }
+                                                    // Show chunk label for non-PDFs
+                                                    if (result.chunkIndex !== undefined && result.totalChunks) {
+                                                        return (
+                                                            <span className="text-xs flex-shrink-0 text-gray-500">
+                                                                Chunk{" "}
+                                                                {result.chunkIndex + 1}
+                                                                /
+                                                                {result.totalChunks}
+                                                            </span>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
                                             </div>
                                             <div className="flex items-center gap-2 flex-shrink-0">
                                                 <span className="text-xs font-medium px-2 py-1 rounded bg-white/10">
@@ -902,6 +1282,17 @@ function App() {
                                                 >
                                                     <ExternalLink className="w-4 h-4" />
                                                 </button>
+                                                <button
+                                                    onClick={() =>
+                                                        handleOpenFileLocation(
+                                                            result.filePath,
+                                                        )
+                                                    }
+                                                    className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors"
+                                                    title="Show in file explorer"
+                                                >
+                                                    <Folder className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </div>
 
@@ -919,7 +1310,7 @@ function App() {
                                                 </p>
                                             </div>
                                         ) : (
-                                            <p className="text-sm leading-relaxed text-gray-300 mb-3">
+                                            <p className="text-sm leading-relaxed text-gray-300 mb-3 line-clamp-2">
                                                 {result.content}
                                             </p>
                                         )}
@@ -958,7 +1349,83 @@ function App() {
                             <div className="text-center text-gray-500 py-20">
                                 <p>No results found for "{query}"</p>
                             </div>
-                        ) : null}
+                        ) : recentSearches.length > 0 ? (
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                                    <h3 className="text-sm font-medium text-gray-400">
+                                        Recent Searches
+                                    </h3>
+                                    <button
+                                        onClick={() =>
+                                            clearRecentSearches(selectedIndex)
+                                        }
+                                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                    >
+                                        Clear all
+                                    </button>
+                                </div>
+
+                                <div className="grid gap-3">
+                                    {recentSearches.map((search, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() =>
+                                                loadCachedSearch(search)
+                                            }
+                                            className="text-left border border-white/10 rounded-lg p-4 hover:border-white/20 hover:bg-white/5 transition-all group"
+                                        >
+                                            <div className="flex items-start justify-between gap-4 mb-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                                        <span className="font-medium truncate">
+                                                            {search.query}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                        <span className="px-2 py-0.5 bg-white/5 rounded">
+                                                            {search.strategy}
+                                                        </span>
+                                                        {search.contentFilter !==
+                                                            "all" && (
+                                                            <span className="px-2 py-0.5 bg-white/5 rounded">
+                                                                {
+                                                                    search.contentFilter
+                                                                }
+                                                            </span>
+                                                        )}
+                                                        <span>
+                                                            {search.resultCount}{" "}
+                                                            results
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                                                        <Clock className="w-3 h-3" />
+                                                        {formatTimestamp(
+                                                            search.timestamp,
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs bg-green-500/10 text-green-400 px-2 py-1 rounded border border-green-500/20 flex items-center gap-1">
+                                                        <HardDrive className="w-3 h-3" />
+                                                        Cached
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center text-gray-500 py-20">
+                                <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                                <p>
+                                    Start searching to see recent searches here
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -1047,6 +1514,57 @@ function App() {
                                         </p>
                                     )}
                             </div>
+                            
+                            {/* Content Type Selection */}
+                            <div className="mt-4">
+                                <label className="block text-sm font-medium mb-2">
+                                    Index Content Type
+                                </label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIndexContentType("both")}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
+                                            indexContentType === "both"
+                                                ? "bg-white text-black border-white"
+                                                : "border-white/10 hover:bg-white/5"
+                                        }`}
+                                        disabled={indexing}
+                                    >
+                                        Both
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIndexContentType("text")}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
+                                            indexContentType === "text"
+                                                ? "bg-white text-black border-white"
+                                                : "border-white/10 hover:bg-white/5"
+                                        }`}
+                                        disabled={indexing}
+                                    >
+                                        Text Only
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIndexContentType("images")}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
+                                            indexContentType === "images"
+                                                ? "bg-white text-black border-white"
+                                                : "border-white/10 hover:bg-white/5"
+                                        }`}
+                                        disabled={indexing}
+                                    >
+                                        Images Only
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                    {indexContentType === "both" && "Index both text and images from PDFs"}
+                                    {indexContentType === "text" && "Index only text content (faster, smaller index)"}
+                                    {indexContentType === "images" && "Index only images from PDFs"}
+                                </p>
+                            </div>
+                            
                             <div className="flex gap-2">
                                 <button
                                     type="button"
@@ -1127,7 +1645,7 @@ function App() {
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="text-xs text-gray-400 mb-1">
-                                                Current file
+                                                {currentPhase || "Current file"}
                                             </div>
                                             <div className="font-mono text-sm truncate">
                                                 {indexProgress.file}
@@ -1160,9 +1678,10 @@ function App() {
                                 <>
                                     <button
                                         onClick={handleCancelIndexing}
-                                        className="flex-1 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg transition-colors text-red-400 font-medium"
+                                        disabled={cancelling}
+                                        className="flex-1 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg transition-colors text-red-400 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        Cancel Indexing
+                                        {cancelling ? "Cancelling..." : "Cancel Indexing"}
                                     </button>
                                     <div className="flex-1 text-xs text-gray-500 flex items-center justify-center">
                                         This may take a few moments depending on
@@ -1176,6 +1695,112 @@ function App() {
                                 >
                                     Done
                                 </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Update/Sync Progress Modal */}
+            {updateProgress && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-black border border-white/20 rounded-lg max-w-2xl w-full mx-4 p-8 shadow-2xl">
+                        <div className="mb-6">
+                            <h2 className="text-xl font-medium mb-2">
+                                {updateComplete
+                                    ? "Sync Complete!"
+                                    : "Syncing changes"}
+                            </h2>
+                            <p className="text-sm text-gray-400 font-mono truncate">
+                                {updateProgress.indexPath}
+                            </p>
+                        </div>
+
+                        {/* Progress Bar */}
+                        {!updateComplete && (
+                            <>
+                                <div className="mb-6">
+                                    <div className="flex items-center justify-between text-sm mb-2">
+                                        <span className="text-gray-400">
+                                            Processing files...
+                                        </span>
+                                        <span className="font-medium">
+                                            {updateProgress.current} /{" "}
+                                            {updateProgress.total}
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-white transition-all duration-300 ease-out"
+                                            style={{
+                                                width: `${updateProgress.total > 0 ? (updateProgress.current / updateProgress.total) * 100 : 0}%`,
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-500">
+                                        {updateProgress.total > 0
+                                            ? (
+                                                  (updateProgress.current /
+                                                      updateProgress.total) *
+                                                  100
+                                              ).toFixed(1)
+                                            : "0.0"}
+                                        % complete
+                                    </div>
+                                </div>
+
+                                {/* Current File */}
+                                <div className="bg-white/5 rounded-lg p-4 border border-white/10 mb-6">
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-1">
+                                            <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs text-gray-400 mb-1">
+                                                {currentPhase || "Current file"}
+                                            </div>
+                                            <div className="font-mono text-sm truncate">
+                                                {updateProgress.file}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Completion Message */}
+                        {updateComplete && (
+                            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-6 mb-6">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <CheckCircle className="w-6 h-6 text-green-500" />
+                                    <span className="text-lg font-medium">
+                                        Successfully synced{" "}
+                                        {updateProgress.total} file
+                                        {updateProgress.total !== 1 ? "s" : ""}
+                                    </span>
+                                </div>
+                                <p className="text-sm text-gray-400">
+                                    Index is now up to date
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-3">
+                            {updateComplete ? (
+                                <button
+                                    onClick={() => {
+                                        setUpdateProgress(null);
+                                        setUpdateComplete(false);
+                                    }}
+                                    className="flex-1 px-4 py-2.5 bg-white hover:bg-gray-200 text-black rounded-lg transition-colors font-medium"
+                                >
+                                    Done
+                                </button>
+                            ) : (
+                                <div className="flex-1 text-xs text-gray-500 flex items-center justify-center">
+                                    Updating index with changed files...
+                                </div>
                             )}
                         </div>
                     </div>
@@ -1316,6 +1941,17 @@ function App() {
                                     Open File
                                 </button>
                                 <button
+                                    onClick={() =>
+                                        handleOpenFileLocation(
+                                            selectedResult.filePath,
+                                        )
+                                    }
+                                    className="flex items-center gap-2 px-4 py-2 border border-white/10 rounded-md hover:bg-white/5 text-sm font-medium"
+                                >
+                                    <Folder className="w-4 h-4" />
+                                    Show in Explorer
+                                </button>
+                                <button
                                     onClick={() => {
                                         setShowFullTextModal(false);
                                         setSelectedResult(null);
@@ -1325,6 +1961,181 @@ function App() {
                                     Close
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PDF Preview Modal */}
+            {showPDFPreview && pdfPreviewData && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-black border border-white/20 rounded-lg w-full max-w-6xl max-h-[95vh] flex flex-col shadow-2xl">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-white/10 flex-shrink-0">
+                            <div className="flex-1 min-w-0 pr-4">
+                                <h2 className="text-lg font-medium flex items-center gap-2 truncate">
+                                    <FileText className="w-5 h-5 flex-shrink-0" />
+                                    <span className="truncate">
+                                        {pdfPreviewData.fileName}
+                                    </span>
+                                </h2>
+                                {pdfNumPages > 0 && (
+                                    <div className="text-xs text-gray-400 mt-1">
+                                        {pdfNumPages} pages
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() =>
+                                        setPdfScale(
+                                            Math.max(0.5, pdfScale - 0.25),
+                                        )
+                                    }
+                                    className="p-2 hover:bg-white/10 rounded transition-colors"
+                                    title="Zoom out"
+                                >
+                                    <ZoomOut className="w-4 h-4" />
+                                </button>
+                                <span className="text-xs text-gray-400 min-w-[3rem] text-center">
+                                    {Math.round(pdfScale * 100)}%
+                                </span>
+                                <button
+                                    onClick={() =>
+                                        setPdfScale(
+                                            Math.min(2.0, pdfScale + 0.25),
+                                        )
+                                    }
+                                    className="p-2 hover:bg-white/10 rounded transition-colors"
+                                    title="Zoom in"
+                                >
+                                    <ZoomIn className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() =>
+                                        window.open(
+                                            "/api/file?path=" +
+                                                encodeURIComponent(
+                                                    pdfPreviewData.filePath,
+                                                ),
+                                            "_blank",
+                                        )
+                                    }
+                                    className="p-2 hover:bg-white/10 rounded transition-colors"
+                                    title="Open in new tab"
+                                >
+                                    <ExternalLink className="w-4 h-4" />
+                                </button>
+                                <a
+                                    href={
+                                        "/api/file?path=" +
+                                        encodeURIComponent(
+                                            pdfPreviewData.filePath,
+                                        )
+                                    }
+                                    download
+                                    className="p-2 hover:bg-white/10 rounded transition-colors"
+                                    title="Download PDF"
+                                >
+                                    <Download className="w-4 h-4" />
+                                </a>
+                                <button
+                                    onClick={closePDFPreview}
+                                    className="p-2 hover:bg-white/10 rounded transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* PDF Viewer */}
+                        <div className="flex-1 overflow-auto bg-gray-900 flex items-center justify-center p-4">
+                            <Document
+                                file={
+                                    "/api/file?path=" +
+                                    encodeURIComponent(pdfPreviewData.filePath)
+                                }
+                                onLoadSuccess={onPDFLoadSuccess}
+                                loading={
+                                    <div className="text-gray-400 py-20">
+                                        Loading PDF...
+                                    </div>
+                                }
+                                error={
+                                    <div className="text-red-400 py-20">
+                                        Failed to load PDF
+                                    </div>
+                                }
+                            >
+                                <Page
+                                    pageNumber={pdfPageNumber}
+                                    scale={pdfScale}
+                                    renderTextLayer={true}
+                                    renderAnnotationLayer={true}
+                                    className="shadow-lg"
+                                />
+                            </Document>
+                        </div>
+
+                        {/* Page Navigation Footer */}
+                        <div className="flex items-center justify-between p-4 border-t border-white/10 bg-black/80 flex-shrink-0">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() =>
+                                        setPdfPageNumber(
+                                            Math.max(1, pdfPageNumber - 1),
+                                        )
+                                    }
+                                    disabled={pdfPageNumber <= 1}
+                                    className="p-2 hover:bg-white/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <div className="flex items-center gap-2 text-sm">
+                                    <span className="text-gray-400">Page</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={pdfNumPages}
+                                        value={pdfPageNumber}
+                                        onChange={(e) => {
+                                            const page = parseInt(
+                                                e.target.value,
+                                            );
+                                            if (
+                                                page >= 1 &&
+                                                page <= pdfNumPages
+                                            ) {
+                                                setPdfPageNumber(page);
+                                            }
+                                        }}
+                                        className="w-16 px-2 py-1 bg-white/5 border border-white/10 rounded text-center focus:border-white/30 outline-none"
+                                    />
+                                    <span className="text-gray-400">
+                                        of {pdfNumPages}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={() =>
+                                        setPdfPageNumber(
+                                            Math.min(
+                                                pdfNumPages,
+                                                pdfPageNumber + 1,
+                                            ),
+                                        )
+                                    }
+                                    disabled={pdfPageNumber >= pdfNumPages}
+                                    className="p-2 hover:bg-white/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronRightIcon className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <button
+                                onClick={closePDFPreview}
+                                className="px-4 py-2 border border-white/10 rounded-md hover:bg-white/5 text-sm"
+                            >
+                                Close
+                            </button>
                         </div>
                     </div>
                 </div>

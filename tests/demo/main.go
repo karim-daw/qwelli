@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -134,7 +135,7 @@ func main() {
 	}
 
 	// Generate embeddings
-	embeddings, err := embedder.EmbedBatch(contents)
+	embeddings, err := embedder.EmbedBatch(context.Background(), contents, nil)
 	if err != nil {
 		log.Fatalf("Failed to generate embeddings: %v", err)
 	}

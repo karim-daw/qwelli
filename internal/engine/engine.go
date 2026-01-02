@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -23,6 +24,7 @@ type SearchResult struct {
 	Content      string
 	TextMetadata map[string]interface{}
 	ImageData    []byte // Base64 encoded image data for image results
+	PageNumbers  []int  // Page numbers for PDF chunks
 }
 
 type Engine struct {
@@ -30,6 +32,7 @@ type Engine struct {
 	model            string
 	endpoint         string
 	enableMultimodal bool
+	contentTypeMode  fileprocessor.ContentTypeMode
 }
 
 func NewEngine(apiKey, model, endpoint string, enableMultimodal bool) *Engine {
@@ -38,10 +41,23 @@ func NewEngine(apiKey, model, endpoint string, enableMultimodal bool) *Engine {
 		model:            model,
 		endpoint:         endpoint,
 		enableMultimodal: enableMultimodal,
+		contentTypeMode:  fileprocessor.ContentTypeBoth, // Default to both
 	}
 }
 
-func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string)) error {
+// SetContentTypeMode sets the content type mode for indexing
+func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
+	e.contentTypeMode = mode
+}
+
+func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string), phaseCallback ...func(phase, message string, current, total int)) error {
+	// Helper to emit phase updates
+	emitPhase := func(phase, message string, current, total int) {
+		if len(phaseCallback) > 0 && phaseCallback[0] != nil {
+			phaseCallback[0](phase, message, current, total)
+		}
+	}
+
 	// Detect dimension
 	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
 	if err != nil {
@@ -141,6 +157,13 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 	oneDriveSkipped := 0
 
 	for i, f := range filesToProcess {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if progressCallback != nil {
 			progressCallback(i+1, len(filesToProcess), f)
 		}
@@ -203,6 +226,7 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 		// Prepare processing options
 		options := fileprocessor.ProcessOptions{
 			EnableMultimodal: e.enableMultimodal && embedder.IsMultimodal(),
+			ContentTypeMode:  e.contentTypeMode,
 			ChunkSize:        300,
 			OverlapSize:      10,
 		}
@@ -233,38 +257,79 @@ func (e *Engine) IndexFolder(folderPath, dbPath string, incremental bool, progre
 
 	// Generate embeddings for all chunks using EmbeddingGenerator
 	if len(allChunks) > 0 {
+		// Check for cancellation before starting embeddings
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		log.Printf("🔄 Generating embeddings for %d chunks...", len(allChunks))
+		emitPhase("embedding", fmt.Sprintf("Generating embeddings for %d chunks", len(allChunks)), 0, len(allChunks))
 		embeddingStart := time.Now()
 
+		// Reset progress bar when embedding starts
+		// Send a progress message with current=0 to reset the bar
+		if progressCallback != nil {
+			progressCallback(0, len(allChunks), "Generating embeddings...")
+		}
+
+		// Create progress callback for embedding batches
+		embeddingProgressCallback := func(current, total int) {
+			// Check for cancellation
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Send progress update through progress callback to update the progress bar
+			if progressCallback != nil {
+				progressCallback(current, total, fmt.Sprintf("Generating embeddings: %d/%d chunks", current, total))
+			}
+			// Also send phase update for the message
+			emitPhase("embedding", fmt.Sprintf("Generating embeddings: %d/%d chunks", current, total), current, total)
+		}
+
 		embeddingGen := NewEmbeddingGenerator(embedder, e.enableMultimodal)
-		embeddingMap, err := embeddingGen.GenerateEmbeddings(allChunks)
+		embeddingMap, err := embeddingGen.GenerateEmbeddings(ctx, allChunks, embeddingProgressCallback)
 		if err != nil {
+			// Check if error is due to cancellation
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return fmt.Errorf("failed to generate embeddings: %w", err)
 		}
 
 		log.Printf("✅ Generated %d embeddings in %v", len(embeddingMap), time.Since(embeddingStart))
+		emitPhase("embedding", fmt.Sprintf("Generated %d embeddings", len(embeddingMap)), len(embeddingMap), len(allChunks))
 
 		// Store chunks and embeddings
 		log.Printf("💾 Storing chunks and embeddings in database...")
+		emitPhase("storing", fmt.Sprintf("Storing %d chunks and embeddings", len(allChunks)), 0, len(allChunks))
 		storeStart := time.Now()
 		if err := StoreChunksAndEmbeddings(projectDB, allChunks, embeddingMap); err != nil {
 			return fmt.Errorf("failed to store chunks and embeddings: %w", err)
 		}
 		log.Printf("✅ Stored in %v", time.Since(storeStart))
+		emitPhase("storing", fmt.Sprintf("Stored %d chunks", len(allChunks)), len(allChunks), len(allChunks))
 	}
 
 	// Rebuild HNSW index if needed (after any embedding changes)
 	if (needsRebuild || len(allChunks) > 0) && len(allChunks) > 0 {
 		log.Printf("🔨 Rebuilding HNSW index...")
+		emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
 		indexStart := time.Now()
 		if err := projectDB.RebuildHNSWIndex(); err != nil {
 			return fmt.Errorf("failed to rebuild HNSW index: %w", err)
 		}
 		log.Printf("✅ HNSW index rebuilt in %v", time.Since(indexStart))
+		emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
 	}
 
 	// Print summary
 	successfulFiles := len(filesToProcess) - skippedFiles
+	emitPhase("complete", fmt.Sprintf("Processed %d files successfully", successfulFiles), successfulFiles, len(filesToProcess))
 	log.Printf("📊 Indexing Summary: %d files processed successfully, %d files skipped", successfulFiles, skippedFiles)
 	if oneDriveSkipped > 0 {
 		log.Printf("💡 Note: %d OneDrive placeholder files were skipped (not downloaded locally)", oneDriveSkipped)
@@ -354,7 +419,8 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 			Distance:     r.Distance,
 			Content:      strings.TrimSpace(r.Content),
 			TextMetadata: metadata,
-			ImageData:    r.ImageData, // Include image data for previews
+			ImageData:    r.ImageData,   // Include image data for previews
+			PageNumbers:  r.PageNumbers, // Include page numbers directly
 		})
 	}
 	return out, nil

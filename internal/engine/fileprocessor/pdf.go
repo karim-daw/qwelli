@@ -27,9 +27,17 @@ func (p *PDFProcessor) CanProcess(fileType string) bool {
 
 // Process processes a PDF file and returns chunks
 func (p *PDFProcessor) Process(file db.File, options ProcessOptions) ([]db.Chunk, []string, error) {
+	// If text-only mode is selected, use text-only processing (skip image extraction entirely)
+	if options.ContentTypeMode == ContentTypeText {
+		return p.processTextOnly(file, options)
+	}
+
+	// If multimodal is enabled and we want images or both, use multimodal processing
 	if options.EnableMultimodal {
 		return p.processMultimodal(file, options)
 	}
+
+	// Default to text-only if multimodal is disabled
 	return p.processTextOnly(file, options)
 }
 
@@ -42,12 +50,25 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
 
-	// Extract images
-	imageExtractor := processor.NewImageExtractor(1024, 1024)
-	images, err := imageExtractor.ExtractImages(file.Path)
-	if err != nil {
-		log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)", filepath.Base(file.Path), err)
+	// Only extract images if we need them (not in text-only mode)
+	var images []processor.PDFImage
+	var imageExtractor *processor.ImageExtractor
+	if options.ContentTypeMode != ContentTypeText {
+		imageExtractor = processor.NewImageExtractor(1024, 1024)
+		// Extract images page-by-page to get correct page numbers
+		for _, page := range pages {
+			pageImages, err := imageExtractor.ExtractImagesByPage(file.Path, page.PageNumber)
+			if err != nil {
+				log.Printf("⚠️  Failed to extract images from page %d of %s: %v (continuing)",
+					page.PageNumber, filepath.Base(file.Path), err)
+				continue
+			}
+			images = append(images, pageImages...)
+		}
+	} else {
+		// Text-only mode: skip image extraction entirely
 		images = []processor.PDFImage{}
+		imageExtractor = processor.NewImageExtractor(1024, 1024) // Still need it for chunker, but won't extract
 	}
 
 	// Create multimodal chunker
@@ -63,23 +84,40 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 		return nil, nil, fmt.Errorf("failed to chunk PDF: %w", err)
 	}
 
-	// Convert to db.Chunk format
+	// Convert to db.Chunk format and filter based on ContentTypeMode
 	var dbChunks []db.Chunk
 	var contents []string
+	chunkIndex := 0
 
-	for i, mc := range multimodalChunks {
+	for _, mc := range multimodalChunks {
+		// Filter based on content type mode
+		switch options.ContentTypeMode {
+		case ContentTypeText:
+			if mc.ContentType != "text" {
+				continue // Skip images
+			}
+		case ContentTypeImages:
+			if mc.ContentType != "image" {
+				continue // Skip text
+			}
+		case ContentTypeBoth:
+			// Include both, no filtering
+		default:
+			// Default to both if not specified
+		}
+
 		pageNumbers := []int{}
 		if len(mc.PageNumbers) > 0 {
 			pageNumbers = mc.PageNumbers
 		}
 
 		dbChunk := db.Chunk{
-			ChunkID:     scanner.GenerateChunkID(file.FileID, i),
+			ChunkID:     scanner.GenerateChunkID(file.FileID, chunkIndex),
 			FileID:      file.FileID,
 			FilePath:    file.Path,
 			FileType:    file.FileType,
-			ChunkIndex:  mc.ChunkIndex,
-			TotalChunks: mc.TotalChunks,
+			ChunkIndex:  chunkIndex,
+			TotalChunks: 0, // Will be updated after filtering
 			Content:     mc.Content,
 			PageNumbers: pageNumbers,
 			ContentType: mc.ContentType,
@@ -88,6 +126,12 @@ func (p *PDFProcessor) processMultimodal(file db.File, options ProcessOptions) (
 
 		dbChunks = append(dbChunks, dbChunk)
 		contents = append(contents, mc.Content)
+		chunkIndex++
+	}
+
+	// Update total chunks count
+	for i := range dbChunks {
+		dbChunks[i].TotalChunks = len(dbChunks)
 	}
 
 	return dbChunks, contents, nil

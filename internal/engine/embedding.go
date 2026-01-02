@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -27,9 +28,17 @@ func NewEmbeddingGenerator(embedder *indexer.Embedder, enableMultimodal bool) *E
 
 // GenerateEmbeddings generates embeddings for chunks
 // Returns a map of chunk index to embedding vector
-func (g *EmbeddingGenerator) GenerateEmbeddings(chunks []db.Chunk) (map[int][]float32, error) {
+// progressCallback is called with (current, total) as batches are processed
+func (g *EmbeddingGenerator) GenerateEmbeddings(ctx context.Context, chunks []db.Chunk, progressCallback func(current, total int)) (map[int][]float32, error) {
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("no chunks to embed")
+	}
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	// Check if we have multimodal chunks (images)
@@ -42,14 +51,14 @@ func (g *EmbeddingGenerator) GenerateEmbeddings(chunks []db.Chunk) (map[int][]fl
 	}
 
 	if hasImages && g.enableMultimodal && g.embedder.IsMultimodal() {
-		return g.generateMultimodalEmbeddings(chunks)
+		return g.generateMultimodalEmbeddings(ctx, chunks, progressCallback)
 	}
 
-	return g.generateTextEmbeddings(chunks)
+	return g.generateTextEmbeddings(ctx, chunks, progressCallback)
 }
 
 // generateMultimodalEmbeddings generates embeddings for multimodal chunks (text + images)
-func (g *EmbeddingGenerator) generateMultimodalEmbeddings(chunks []db.Chunk) (map[int][]float32, error) {
+func (g *EmbeddingGenerator) generateMultimodalEmbeddings(ctx context.Context, chunks []db.Chunk, progressCallback func(current, total int)) (map[int][]float32, error) {
 	multimodalInputs := make([]indexer.MultimodalInput, 0, len(chunks))
 	validChunkIndices := make([]int, 0, len(chunks))
 
@@ -103,9 +112,13 @@ func (g *EmbeddingGenerator) generateMultimodalEmbeddings(chunks []db.Chunk) (ma
 	}
 	log.Printf("  Batch contains %d text inputs and %d image inputs", textCount, imageCount)
 
-	// Generate embeddings
-	embeddings, err := g.embedder.EmbedMultimodal(multimodalInputs)
+	// Generate embeddings with progress tracking
+	embeddings, err := g.embedder.EmbedMultimodal(ctx, multimodalInputs, progressCallback)
 	if err != nil {
+		// Check if error is due to cancellation
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("failed to generate embeddings: %w", err)
 	}
 
@@ -126,7 +139,7 @@ func (g *EmbeddingGenerator) generateMultimodalEmbeddings(chunks []db.Chunk) (ma
 }
 
 // generateTextEmbeddings generates embeddings for text-only chunks
-func (g *EmbeddingGenerator) generateTextEmbeddings(chunks []db.Chunk) (map[int][]float32, error) {
+func (g *EmbeddingGenerator) generateTextEmbeddings(ctx context.Context, chunks []db.Chunk, progressCallback func(current, total int)) (map[int][]float32, error) {
 	texts := make([]string, 0, len(chunks))
 	validChunkIndices := make([]int, 0, len(chunks))
 
@@ -143,9 +156,13 @@ func (g *EmbeddingGenerator) generateTextEmbeddings(chunks []db.Chunk) (map[int]
 		return nil, fmt.Errorf("no valid chunks to embed")
 	}
 
-	// Generate embeddings
-	embeddings, err := g.embedder.EmbedBatch(texts)
+	// Generate embeddings with progress tracking
+	embeddings, err := g.embedder.EmbedBatch(ctx, texts, progressCallback)
 	if err != nil {
+		// Check if error is due to cancellation
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("failed to generate embeddings: %w", err)
 	}
 

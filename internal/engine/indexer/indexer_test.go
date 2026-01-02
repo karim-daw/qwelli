@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -85,7 +86,7 @@ func TestEmbedder_RealAPI(t *testing.T) {
 
 	t.Run("embed_batch_via_wrapper", func(t *testing.T) {
 		texts := []string{"text one", "text two"}
-		embeddings, err := embedder.EmbedBatch(texts)
+		embeddings, err := embedder.EmbedBatch(context.Background(), texts, nil)
 		if err != nil {
 			t.Fatalf("Embedder.EmbedBatch() error = %v", err)
 		}
