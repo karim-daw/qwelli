@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -163,8 +164,17 @@ func parsePageNumbers(iface interface{}) []int {
 				result = append(result, val)
 			case int64:
 				result = append(result, int(val))
+			case int32:
+				result = append(result, int(val))
+			case int16:
+				result = append(result, int(val))
+			case int8:
+				result = append(result, int(val))
 			case float64:
 				result = append(result, int(val))
+			default:
+				// Log unexpected type for debugging
+				log.Printf("⚠️  parsePageNumbers: unexpected type %T for value %v", val, val)
 			}
 		}
 		return result
@@ -175,6 +185,8 @@ func parsePageNumbers(iface interface{}) []int {
 		return parseIntArray(s)
 	}
 
+	// Debug: log if we can't parse
+	log.Printf("⚠️  parsePageNumbers: cannot parse type %T, value: %v", iface, iface)
 	return []int{}
 }
 
