@@ -1246,11 +1246,14 @@ function App() {
                                             </div>
                                             <div className="flex items-center gap-2 flex-shrink-0">
                                                 <span className="text-xs font-medium px-2 py-1 rounded bg-white/10">
-                                                    {(
-                                                        (1 -
-                                                            result.similarity) *
-                                                        100
-                                                    ).toFixed(0)}
+                                                    {(() => {
+                                                        // Handle reranked results (negative values are relevance scores)
+                                                        if (result.similarity < 0) {
+                                                            return (Math.abs(result.similarity) * 100).toFixed(0);
+                                                        }
+                                                        // Handle distance metrics (0-1 range)
+                                                        return ((1 - result.similarity) * 100).toFixed(0);
+                                                    })()}
                                                     %
                                                 </span>
                                                 <button
@@ -1843,10 +1846,14 @@ function App() {
                                             </span>
                                         )}
                                     <span className="px-2 py-1 rounded bg-white/10">
-                                        {(
-                                            (1 - selectedResult.similarity) *
-                                            100
-                                        ).toFixed(0)}
+                                        {(() => {
+                                            // Handle reranked results (negative values are relevance scores)
+                                            if (selectedResult.similarity < 0) {
+                                                return (Math.abs(selectedResult.similarity) * 100).toFixed(0);
+                                            }
+                                            // Handle distance metrics (0-1 range)
+                                            return ((1 - selectedResult.similarity) * 100).toFixed(0);
+                                        })()}
                                         % match
                                     </span>
                                 </div>
