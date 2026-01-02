@@ -126,22 +126,28 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 					continue
 				}
 
-				// Size same, check modification time
-				mtimeDiff := info.ModTime().Sub(dbFile.ModifiedAt)
-				if mtimeDiff < -time.Second || mtimeDiff > time.Second {
-					// mtime significantly different, compute hash
-					currentHash, err := processor.ComputeSHA256(absPath)
-					if err != nil {
-						resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
-						continue
-					}
-
-					if currentHash != dbFile.FileHash {
-						resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
-						continue
-					}
+				// Size same - check modification time first (optimization)
+				// If mtime is exactly the same, file likely unchanged
+				if info.ModTime().Equal(dbFile.ModifiedAt) {
+					resultChan <- fileCheckResult{absPath: absPath, status: "unchanged"}
+					continue
 				}
 
+				// Mtime changed - verify content hash to be sure
+				currentHash, err := processor.ComputeSHA256(absPath)
+				if err != nil {
+					log.Printf("⚠️  Failed to compute hash for %s: %v", filepath.Base(absPath), err)
+					resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
+					continue
+				}
+
+				if currentHash != dbFile.FileHash {
+					log.Printf("📝 File modified (hash changed): %s", filepath.Base(absPath))
+					resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
+					continue
+				}
+
+				// Hash same despite mtime change (e.g., touch command)
 				resultChan <- fileCheckResult{absPath: absPath, status: "unchanged"}
 			}
 		})
