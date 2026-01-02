@@ -20,6 +20,12 @@ type Config struct {
 	EnableMultimodal bool   `yaml:"enable_multimodal"` // Enable multimodal embeddings (images)
 	ImageQuality     string `yaml:"image_quality"`     // "low", "medium", "high" (default: "medium")
 
+	// Reranker settings
+	EnableReranker   bool   `yaml:"enable_reranker"`   // Enable reranking of search results
+	RerankProvider   string `yaml:"rerank_provider"`   // "voyage" (default)
+	RerankModel      string `yaml:"rerank_model"`      // Reranker model to use
+	RerankEndpoint   string `yaml:"rerank_endpoint"`   // Custom reranker endpoint (optional)
+
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
 }
@@ -35,6 +41,10 @@ func DefaultConfig() *Config {
 		Endpoint:          os.Getenv("QWELLI_EMBEDDING_ENDPOINT"),
 		EnableMultimodal:  true, // Default to true for Voyage
 		ImageQuality:      "medium",
+		EnableReranker:    true, // Default to true (enabled by default)
+		RerankProvider:    "voyage",
+		RerankModel:       os.Getenv("QWELLI_RERANK_MODEL"),
+		RerankEndpoint:    os.Getenv("QWELLI_RERANK_ENDPOINT"),
 		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
