@@ -6,7 +6,6 @@ import {
     ExternalLink,
     Image as ImageIcon,
     X,
-    Settings2,
     RefreshCw,
     AlertCircle,
     CheckCircle,
@@ -95,7 +94,6 @@ function App() {
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [showNewIndexDialog, setShowNewIndexDialog] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
     const [viewMode, setViewMode] = useState<"search" | "status">("search");
     const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
@@ -687,7 +685,6 @@ function App() {
                         {viewMode === "search" && (
                             <form onSubmit={handleSearch} className="relative">
                                 <div className="relative">
-                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                     <input
                                         type="text"
                                         value={query}
@@ -696,129 +693,114 @@ function App() {
                                         }
                                         placeholder="Search knowledge base..."
                                         disabled={!selectedIndex}
-                                        className="w-full pl-12 pr-12 py-3.5 text-base bg-white/5 border border-white/10 rounded-xl focus:border-white/30 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-gray-500"
+                                        className="w-full pl-4 pr-4 py-3.5 text-base bg-white/5 border border-white/10 rounded-xl focus:border-white/30 outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-gray-500"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            setShowSettings(!showSettings)
-                                        }
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/10"
-                                    >
-                                        <Settings2 className="w-4 h-4" />
-                                    </button>
                                 </div>
 
-                                {showSettings && (
-                                    <div className="absolute top-full mt-2 right-0 bg-black border border-white/10 rounded-lg p-4 shadow-2xl w-80 z-50">
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="block text-xs text-gray-400 mb-2">
-                                                    Search Strategy
-                                                </label>
-                                                <div className="grid grid-cols-3 gap-2">
-                                                    {[
-                                                        "semantic",
-                                                        "keyword",
-                                                        "hybrid",
-                                                    ].map((s) => (
-                                                        <button
-                                                            key={s}
-                                                            type="button"
-                                                            onClick={() =>
-                                                                setStrategy(s)
-                                                            }
-                                                            className={
-                                                                "px-3 py-2 text-xs rounded-md transition-colors " +
-                                                                (strategy === s
-                                                                    ? "bg-white text-black"
-                                                                    : "bg-white/5 hover:bg-white/10")
-                                                            }
-                                                        >
-                                                            {s
-                                                                .charAt(0)
-                                                                .toUpperCase() +
-                                                                s.slice(1)}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <label className="block text-xs text-gray-400 mb-2">
-                                                    Content Type
-                                                </label>
-                                                <div className="grid grid-cols-3 gap-2">
-                                                    {[
-                                                        {
-                                                            value: "all",
-                                                            label: "All",
-                                                        },
-                                                        {
-                                                            value: "text",
-                                                            label: "Text",
-                                                        },
-                                                        {
-                                                            value: "image",
-                                                            label: "Images",
-                                                        },
-                                                    ].map((c) => (
-                                                        <button
-                                                            key={c.value}
-                                                            type="button"
-                                                            onClick={() =>
-                                                                setContentFilter(
-                                                                    c.value,
-                                                                )
-                                                            }
-                                                            className={
-                                                                "px-3 py-2 text-xs rounded-md transition-colors " +
-                                                                (contentFilter ===
-                                                                c.value
-                                                                    ? "bg-white text-black"
-                                                                    : "bg-white/5 hover:bg-white/10")
-                                                            }
-                                                        >
-                                                            {c.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <label className="block text-xs text-gray-400 mb-2">
-                                                    Results: {topK}
-                                                </label>
-                                                <input
-                                                    type="range"
-                                                    min="5"
-                                                    max="50"
-                                                    step="5"
-                                                    value={topK}
-                                                    onChange={(e) =>
-                                                        setTopK(
-                                                            parseInt(
-                                                                e.target.value,
-                                                            ),
-                                                        )
+                                {/* Inline Settings Controls */}
+                                <div className="mt-3 flex items-center gap-4 text-xs">
+                                    {/* Search Strategy */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Strategy:</span>
+                                        <div className="flex gap-1">
+                                            {[
+                                                "semantic",
+                                                "keyword",
+                                                "hybrid",
+                                            ].map((s) => (
+                                                <button
+                                                    key={s}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setStrategy(s)
                                                     }
-                                                    className="w-full"
-                                                />
-                                            </div>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setShowSettings(false);
-                                                    handleSearch();
-                                                }}
-                                                className="w-full px-4 py-2 text-sm bg-white text-black rounded-md hover:opacity-90"
-                                            >
-                                                Apply & Search
-                                            </button>
+                                                    className={
+                                                        "px-2.5 py-1 rounded-md transition-all text-xs font-medium " +
+                                                        (strategy === s
+                                                            ? "bg-white/20 text-white"
+                                                            : "text-gray-400 hover:text-gray-300 hover:bg-white/5")
+                                                    }
+                                                >
+                                                    {s
+                                                        .charAt(0)
+                                                        .toUpperCase() +
+                                                        s.slice(1)}
+                                                </button>
+                                            ))}
                                         </div>
                                     </div>
-                                )}
+
+                                    {/* Divider */}
+                                    <div className="w-px h-4 bg-white/10" />
+
+                                    {/* Content Type */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Type:</span>
+                                        <div className="flex gap-1">
+                                            {[
+                                                {
+                                                    value: "all",
+                                                    label: "All",
+                                                },
+                                                {
+                                                    value: "text",
+                                                    label: "Text",
+                                                },
+                                                {
+                                                    value: "image",
+                                                    label: "Images",
+                                                },
+                                            ].map((c) => (
+                                                <button
+                                                    key={c.value}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setContentFilter(
+                                                            c.value,
+                                                        )
+                                                    }
+                                                    className={
+                                                        "px-2.5 py-1 rounded-md transition-all text-xs font-medium " +
+                                                        (contentFilter ===
+                                                        c.value
+                                                            ? "bg-white/20 text-white"
+                                                            : "text-gray-400 hover:text-gray-300 hover:bg-white/5")
+                                                    }
+                                                >
+                                                    {c.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Divider */}
+                                    <div className="w-px h-4 bg-white/10" />
+
+                                    {/* Results Count */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Results:</span>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="range"
+                                                min="5"
+                                                max="50"
+                                                step="5"
+                                                value={topK}
+                                                onChange={(e) =>
+                                                    setTopK(
+                                                        parseInt(
+                                                            e.target.value,
+                                                        ),
+                                                    )
+                                                }
+                                                className="w-20 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                                            />
+                                            <span className="text-gray-400 min-w-[2rem] text-right">
+                                                {topK}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
                             </form>
                         )}
                     </div>
