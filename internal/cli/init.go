@@ -73,6 +73,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		cfg.EnableMultimodal = false
 	}
 
+	// Ask about reranker (default enabled for Voyage)
+	fmt.Print("Enable AI reranking (improves search result relevance)? [Y/n]: ")
+	rerankInput, _ := reader.ReadString('\n')
+	rerankInput = strings.TrimSpace(strings.ToLower(rerankInput))
+	if rerankInput == "n" || rerankInput == "no" {
+		cfg.EnableReranker = false
+	}
+
 	// Save configuration
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
