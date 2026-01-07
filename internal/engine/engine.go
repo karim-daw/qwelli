@@ -28,26 +28,34 @@ type SearchResult struct {
 }
 
 type Engine struct {
-	apiKey           string
-	model            string
-	endpoint         string
-	enableMultimodal bool
-	contentTypeMode  fileprocessor.ContentTypeMode
+	apiKey                string
+	model                 string
+	endpoint              string
+	enableMultimodal      bool
+	contentTypeMode       fileprocessor.ContentTypeMode
+	fileProcessingService *fileprocessor.FileProcessingService
 }
 
 func NewEngine(apiKey, model, endpoint string, enableMultimodal bool) *Engine {
+	// Create file processing service with default config
+	processingConfig := fileprocessor.DefaultProcessingConfig()
+	processingConfig.EnableMultimodal = enableMultimodal
+
 	return &Engine{
-		apiKey:           apiKey,
-		model:            model,
-		endpoint:         endpoint,
-		enableMultimodal: enableMultimodal,
-		contentTypeMode:  fileprocessor.ContentTypeBoth, // Default to both
+		apiKey:                apiKey,
+		model:                 model,
+		endpoint:              endpoint,
+		enableMultimodal:      enableMultimodal,
+		contentTypeMode:       fileprocessor.ContentTypeBoth, // Default to both
+		fileProcessingService: fileprocessor.NewFileProcessingService(processingConfig),
 	}
 }
 
 // SetContentTypeMode sets the content type mode for indexing
 func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
 	e.contentTypeMode = mode
+	// Update the file processing service config
+	e.fileProcessingService.SetContentTypeMode(mode)
 }
 
 func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string), phaseCallback ...func(phase, message string, current, total int)) error {
@@ -216,40 +224,41 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			continue
 		}
 
-		// Process file and create chunks using file processor registry
-		processor := fileprocessor.GetProcessor(file.FileType)
-		if processor == nil {
-			log.Printf("⚠️  No processor found for file type %s: %s", file.FileType, absPath)
+		// Check if file type is supported
+		if !e.fileProcessingService.CanProcess(file.FileType) {
+			log.Printf("⚠️  Unsupported file type %s: %s", file.FileType, absPath)
 			continue
 		}
 
-		// Prepare processing options
-		options := fileprocessor.ProcessOptions{
-			EnableMultimodal: e.enableMultimodal && embedder.IsMultimodal(),
-			ContentTypeMode:  e.contentTypeMode,
-			ChunkSize:        300,
-			OverlapSize:      10,
-		}
+		var chunks []db.Chunk
+		var processErr error
 
-		// For text files, read content first
-		if file.FileType != "pdf" {
+		// Process based on file type
+		if file.FileType == "pdf" {
+			// Process PDF
+			chunks, _, processErr = e.fileProcessingService.ProcessPDF(file)
+			if processErr != nil {
+				log.Printf("⚠️  Failed to process PDF %s: %v", filepath.Base(absPath), processErr)
+				continue
+			}
+		} else {
+			// Process text file
 			// Skip very large text files
 			if info.Size() > 500*1024 {
 				continue
 			}
 
-			content, err := os.ReadFile(absPath)
-			if err != nil {
-				log.Printf("⚠️  Failed to read file %s: %v", absPath, err)
+			content, readErr := os.ReadFile(absPath)
+			if readErr != nil {
+				log.Printf("⚠️  Failed to read file %s: %v", absPath, readErr)
 				continue
 			}
-			options.FileContent = string(content)
-		}
 
-		chunks, _, err := processor.Process(file, options)
-		if err != nil {
-			log.Printf("⚠️  Failed to process file %s: %v", filepath.Base(absPath), err)
-			continue
+			chunks, _, processErr = e.fileProcessingService.ProcessText(file, string(content))
+			if processErr != nil {
+				log.Printf("⚠️  Failed to process text file %s: %v", filepath.Base(absPath), processErr)
+				continue
+			}
 		}
 
 		allChunks = append(allChunks, chunks...)
