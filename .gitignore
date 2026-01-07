@@ -46,3 +46,4 @@ web/dist/
 web/package-lock.json
 internal/server/web/dist
 internal/server/web/dist/index.html
+internal/server/web/dist/index.html
