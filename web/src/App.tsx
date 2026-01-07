@@ -332,8 +332,8 @@ function App() {
             const searchResults = data.results || [];
             // Debug: log page numbers for PDFs
             searchResults.forEach((r: SearchResult) => {
-                const isPDF = r.fileName?.toLowerCase().endsWith(".pdf") || 
-                             r.filePath?.toLowerCase().endsWith(".pdf");
+                const isPDF = r.fileName?.toLowerCase().endsWith(".pdf") ||
+                    r.filePath?.toLowerCase().endsWith(".pdf");
                 if (isPDF) {
                     console.log("PDF result:", {
                         fileName: r.fileName,
@@ -385,12 +385,12 @@ function App() {
         if (!newIndexPath.trim()) return;
 
         setIndexing(true);
-        const convertedPath = convertWindowsPathToWSL(newIndexPath.trim());
+        // const convertedPath = convertWindowsPathToWSL(newIndexPath.trim());
 
         try {
             // Connect to SSE progress stream
             const eventSource = new EventSource(
-                "/api/index/progress?path=" + encodeURIComponent(convertedPath),
+                "/api/index/progress?path=" + encodeURIComponent(newIndexPath),
             );
 
             eventSource.onmessage = (event) => {
@@ -401,7 +401,7 @@ function App() {
                         current: data.current,
                         total: data.total,
                         file: data.file,
-                        indexPath: convertedPath,
+                        indexPath: newIndexPath,
                     });
                 } else if (data.type === "phase") {
                     setCurrentPhase(data.message || data.phase);
@@ -440,9 +440,9 @@ function App() {
             const response = await fetch("/api/index/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    folderPath: convertedPath,
-                    contentType: indexContentType 
+                body: JSON.stringify({
+                    folderPath: newIndexPath,
+                    contentType: indexContentType
                 }),
             });
 
@@ -600,11 +600,10 @@ function App() {
                                     setResults([]);
                                     setQuery("");
                                 }}
-                                className={`w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors group ${
-                                    selectedIndex === index.path
-                                        ? "bg-white/10"
-                                        : ""
-                                }`}
+                                className={`w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/5 transition-colors group ${selectedIndex === index.path
+                                    ? "bg-white/10"
+                                    : ""
+                                    }`}
                             >
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex-1 min-w-0">
@@ -762,7 +761,7 @@ function App() {
                                                     className={
                                                         "px-2.5 py-1 rounded-md transition-all text-xs font-medium " +
                                                         (contentFilter ===
-                                                        c.value
+                                                            c.value
                                                             ? "bg-white/20 text-white"
                                                             : "text-gray-400 hover:text-gray-300 hover:bg-white/5")
                                                     }
@@ -827,177 +826,177 @@ function App() {
                                                 0) > 0 ||
                                             (indexStatus.toDelete?.length ||
                                                 0) > 0) && (
-                                            <button
-                                                onClick={async () => {
-                                                    if (
-                                                        !confirm(
-                                                            "Sync all changes? This will update the index with new, modified, and deleted files.",
-                                                        )
-                                                    ) {
-                                                        return;
-                                                    }
+                                                <button
+                                                    onClick={async () => {
+                                                        if (
+                                                            !confirm(
+                                                                "Sync all changes? This will update the index with new, modified, and deleted files.",
+                                                            )
+                                                        ) {
+                                                            return;
+                                                        }
 
-                                                    setUpdating(true);
-                                                    setUpdateComplete(false);
+                                                        setUpdating(true);
+                                                        setUpdateComplete(false);
 
-                                                    try {
-                                                        // Connect to SSE progress stream
-                                                        const eventSource =
-                                                            new EventSource(
-                                                                "/api/index/progress?path=" +
+                                                        try {
+                                                            // Connect to SSE progress stream
+                                                            const eventSource =
+                                                                new EventSource(
+                                                                    "/api/index/progress?path=" +
                                                                     encodeURIComponent(
                                                                         selectedIndex,
                                                                     ),
-                                                            );
+                                                                );
 
-                                                        eventSource.onmessage =
-                                                            (event) => {
-                                                                const data =
-                                                                    JSON.parse(
-                                                                        event.data,
-                                                                    );
+                                                            eventSource.onmessage =
+                                                                (event) => {
+                                                                    const data =
+                                                                        JSON.parse(
+                                                                            event.data,
+                                                                        );
 
-                                                                if (
-                                                                    data.type ===
-                                                                    "progress"
-                                                                ) {
-                                                                    setUpdateProgress(
-                                                                        {
-                                                                            current:
-                                                                                data.current,
-                                                                            total: data.total,
-                                                                            file: data.file,
-                                                                            indexPath:
-                                                                                selectedIndex,
-                                                                        },
-                                                                    );
-                                                                } else if (
-                                                                    data.type ===
-                                                                    "phase"
-                                                                ) {
-                                                                    setCurrentPhase(
-                                                                        data.message ||
+                                                                    if (
+                                                                        data.type ===
+                                                                        "progress"
+                                                                    ) {
+                                                                        setUpdateProgress(
+                                                                            {
+                                                                                current:
+                                                                                    data.current,
+                                                                                total: data.total,
+                                                                                file: data.file,
+                                                                                indexPath:
+                                                                                    selectedIndex,
+                                                                            },
+                                                                        );
+                                                                    } else if (
+                                                                        data.type ===
+                                                                        "phase"
+                                                                    ) {
+                                                                        setCurrentPhase(
+                                                                            data.message ||
                                                                             data.phase,
-                                                                    );
-                                                                } else if (
-                                                                    data.type ===
-                                                                    "complete"
-                                                                ) {
-                                                                    eventSource.close();
-                                                                    setUpdateComplete(
-                                                                        true,
-                                                                    );
-                                                                    setUpdating(
-                                                                        false,
-                                                                    );
-                                                                    setCurrentPhase(
-                                                                        "",
-                                                                    );
-                                                                    // Refresh status to show updated state
-                                                                    fetchIndexStatus(
-                                                                        selectedIndex,
-                                                                    );
-                                                                } else if (
-                                                                    data.type ===
-                                                                    "cancelled"
-                                                                ) {
-                                                                    eventSource.close();
-                                                                    setUpdateProgress(
-                                                                        null,
-                                                                    );
-                                                                    setUpdating(
-                                                                        false,
-                                                                    );
-                                                                    setUpdateComplete(
-                                                                        false,
-                                                                    );
-                                                                    setCurrentPhase(
-                                                                        "",
-                                                                    );
-                                                                } else if (
-                                                                    data.type ===
-                                                                    "error"
-                                                                ) {
-                                                                    eventSource.close();
-                                                                    setUpdateProgress(
-                                                                        null,
-                                                                    );
-                                                                    setUpdating(
-                                                                        false,
-                                                                    );
-                                                                    setCurrentPhase(
-                                                                        "",
-                                                                    );
-                                                                    alert(
-                                                                        "Sync error: " +
+                                                                        );
+                                                                    } else if (
+                                                                        data.type ===
+                                                                        "complete"
+                                                                    ) {
+                                                                        eventSource.close();
+                                                                        setUpdateComplete(
+                                                                            true,
+                                                                        );
+                                                                        setUpdating(
+                                                                            false,
+                                                                        );
+                                                                        setCurrentPhase(
+                                                                            "",
+                                                                        );
+                                                                        // Refresh status to show updated state
+                                                                        fetchIndexStatus(
+                                                                            selectedIndex,
+                                                                        );
+                                                                    } else if (
+                                                                        data.type ===
+                                                                        "cancelled"
+                                                                    ) {
+                                                                        eventSource.close();
+                                                                        setUpdateProgress(
+                                                                            null,
+                                                                        );
+                                                                        setUpdating(
+                                                                            false,
+                                                                        );
+                                                                        setUpdateComplete(
+                                                                            false,
+                                                                        );
+                                                                        setCurrentPhase(
+                                                                            "",
+                                                                        );
+                                                                    } else if (
+                                                                        data.type ===
+                                                                        "error"
+                                                                    ) {
+                                                                        eventSource.close();
+                                                                        setUpdateProgress(
+                                                                            null,
+                                                                        );
+                                                                        setUpdating(
+                                                                            false,
+                                                                        );
+                                                                        setCurrentPhase(
+                                                                            "",
+                                                                        );
+                                                                        alert(
+                                                                            "Sync error: " +
                                                                             data.message,
-                                                                    );
-                                                                }
-                                                            };
+                                                                        );
+                                                                    }
+                                                                };
 
-                                                        eventSource.onerror =
-                                                            () => {
+                                                            eventSource.onerror =
+                                                                () => {
+                                                                    eventSource.close();
+                                                                    setUpdateProgress(
+                                                                        null,
+                                                                    );
+                                                                    setUpdating(
+                                                                        false,
+                                                                    );
+                                                                };
+
+                                                            // Start the sync operation
+                                                            const response =
+                                                                await fetch(
+                                                                    "/api/index/update",
+                                                                    {
+                                                                        method: "POST",
+                                                                        headers: {
+                                                                            "Content-Type":
+                                                                                "application/json",
+                                                                        },
+                                                                        body: JSON.stringify(
+                                                                            {
+                                                                                indexPath:
+                                                                                    selectedIndex,
+                                                                            },
+                                                                        ),
+                                                                    },
+                                                                );
+
+                                                            if (!response.ok) {
+                                                                const data =
+                                                                    await response.json();
                                                                 eventSource.close();
                                                                 setUpdateProgress(
                                                                     null,
                                                                 );
-                                                                setUpdating(
-                                                                    false,
+                                                                setUpdating(false);
+                                                                alert(
+                                                                    "Error: " +
+                                                                    data.error,
                                                                 );
-                                                            };
-
-                                                        // Start the sync operation
-                                                        const response =
-                                                            await fetch(
-                                                                "/api/index/update",
-                                                                {
-                                                                    method: "POST",
-                                                                    headers: {
-                                                                        "Content-Type":
-                                                                            "application/json",
-                                                                    },
-                                                                    body: JSON.stringify(
-                                                                        {
-                                                                            indexPath:
-                                                                                selectedIndex,
-                                                                        },
-                                                                    ),
-                                                                },
-                                                            );
-
-                                                        if (!response.ok) {
-                                                            const data =
-                                                                await response.json();
-                                                            eventSource.close();
-                                                            setUpdateProgress(
-                                                                null,
-                                                            );
+                                                            }
+                                                        } catch (error) {
+                                                            setUpdateProgress(null);
                                                             setUpdating(false);
                                                             alert(
-                                                                "Error: " +
-                                                                    data.error,
+                                                                "Failed to sync: " +
+                                                                error,
                                                             );
                                                         }
-                                                    } catch (error) {
-                                                        setUpdateProgress(null);
-                                                        setUpdating(false);
-                                                        alert(
-                                                            "Failed to sync: " +
-                                                                error,
-                                                        );
-                                                    }
-                                                }}
-                                                disabled={updating}
-                                                className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-md hover:opacity-90 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                <RefreshCw
-                                                    className={`w-4 h-4 ${updating ? "animate-spin" : ""}`}
-                                                />
-                                                {updating
-                                                    ? "Syncing..."
-                                                    : "Sync Changes"}
-                                            </button>
-                                        )}
+                                                    }}
+                                                    disabled={updating}
+                                                    className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-md hover:opacity-90 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <RefreshCw
+                                                        className={`w-4 h-4 ${updating ? "animate-spin" : ""}`}
+                                                    />
+                                                    {updating
+                                                        ? "Syncing..."
+                                                        : "Sync Changes"}
+                                                </button>
+                                            )}
                                     </div>
 
                                     {/* Status Summary */}
@@ -1112,9 +1111,9 @@ function App() {
 
                                     {(indexStatus.toAdd?.length || 0) === 0 &&
                                         (indexStatus.toUpdate?.length || 0) ===
-                                            0 &&
+                                        0 &&
                                         (indexStatus.toDelete?.length || 0) ===
-                                            0 && (
+                                        0 && (
                                             <div className="text-center py-20">
                                                 <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
                                                 <p className="text-gray-400">
@@ -1147,25 +1146,25 @@ function App() {
                                     </div>
                                     {(cacheStatus === "HIT" ||
                                         cacheStatus === "LOCAL") && (
-                                        <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded border border-green-500/20">
-                                            <svg
-                                                className="w-3 h-3"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                                                />
-                                            </svg>
-                                            {cacheStatus === "LOCAL"
-                                                ? "Cached Locally"
-                                                : "Cached"}
-                                        </div>
-                                    )}
+                                            <div className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded border border-green-500/20">
+                                                <svg
+                                                    className="w-3 h-3"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    viewBox="0 0 24 24"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                                                    />
+                                                </svg>
+                                                {cacheStatus === "LOCAL"
+                                                    ? "Cached Locally"
+                                                    : "Cached"}
+                                            </div>
+                                        )}
                                 </div>
                                 {results?.map((result, index) => (
                                     <div
@@ -1176,7 +1175,7 @@ function App() {
                                         <div className="flex items-start justify-between gap-4 mb-3">
                                             <div className="flex items-center gap-2 text-sm text-gray-400 flex-1 min-w-0">
                                                 {result.contentType ===
-                                                "image" ? (
+                                                    "image" ? (
                                                     <ImageIcon className="w-4 h-4 flex-shrink-0" />
                                                 ) : (
                                                     <FileText className="w-4 h-4 flex-shrink-0" />
@@ -1186,12 +1185,12 @@ function App() {
                                                         result.filePath}
                                                 </span>
                                                 {(() => {
-                                                    const isPDF = (result.fileName?.toLowerCase().endsWith(".pdf") || 
-                                                                  result.filePath?.toLowerCase().endsWith(".pdf"));
-                                                    const hasPageNumbers = result.pageNumbers && 
-                                                                           Array.isArray(result.pageNumbers) && 
-                                                                           result.pageNumbers.length > 0;
-                                                    
+                                                    const isPDF = (result.fileName?.toLowerCase().endsWith(".pdf") ||
+                                                        result.filePath?.toLowerCase().endsWith(".pdf"));
+                                                    const hasPageNumbers = result.pageNumbers &&
+                                                        Array.isArray(result.pageNumbers) &&
+                                                        result.pageNumbers.length > 0;
+
                                                     if (isPDF && hasPageNumbers && result.pageNumbers) {
                                                         return (
                                                             <button
@@ -1256,9 +1255,9 @@ function App() {
                                                     onClick={() =>
                                                         window.open(
                                                             "/api/file?path=" +
-                                                                encodeURIComponent(
-                                                                    result.filePath,
-                                                                ),
+                                                            encodeURIComponent(
+                                                                result.filePath,
+                                                            ),
                                                             "_blank",
                                                         )
                                                     }
@@ -1283,7 +1282,7 @@ function App() {
 
                                         {/* Content */}
                                         {result.contentType === "image" &&
-                                        result.imageData ? (
+                                            result.imageData ? (
                                             <div className="mb-3">
                                                 <img
                                                     src={`data:image/jpeg;base64,${result.imageData}`}
@@ -1373,12 +1372,12 @@ function App() {
                                                         </span>
                                                         {search.contentFilter !==
                                                             "all" && (
-                                                            <span className="px-2 py-0.5 bg-white/5 rounded">
-                                                                {
-                                                                    search.contentFilter
-                                                                }
-                                                            </span>
-                                                        )}
+                                                                <span className="px-2 py-0.5 bg-white/5 rounded">
+                                                                    {
+                                                                        search.contentFilter
+                                                                    }
+                                                                </span>
+                                                            )}
                                                         <span>
                                                             {search.resultCount}{" "}
                                                             results
@@ -1490,7 +1489,7 @@ function App() {
                                 </p>
                                 {newIndexPath &&
                                     convertWindowsPathToWSL(newIndexPath) !==
-                                        newIndexPath && (
+                                    newIndexPath && (
                                         <p className="text-xs text-gray-500 mt-1">
                                             →{" "}
                                             {convertWindowsPathToWSL(
@@ -1499,7 +1498,7 @@ function App() {
                                         </p>
                                     )}
                             </div>
-                            
+
                             {/* Content Type Selection */}
                             <div className="mt-4">
                                 <label className="block text-sm font-medium mb-2">
@@ -1509,11 +1508,10 @@ function App() {
                                     <button
                                         type="button"
                                         onClick={() => setIndexContentType("both")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
-                                            indexContentType === "both"
-                                                ? "bg-white text-black border-white"
-                                                : "border-white/10 hover:bg-white/5"
-                                        }`}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "both"
+                                            ? "bg-white text-black border-white"
+                                            : "border-white/10 hover:bg-white/5"
+                                            }`}
                                         disabled={indexing}
                                     >
                                         Both
@@ -1521,11 +1519,10 @@ function App() {
                                     <button
                                         type="button"
                                         onClick={() => setIndexContentType("text")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
-                                            indexContentType === "text"
-                                                ? "bg-white text-black border-white"
-                                                : "border-white/10 hover:bg-white/5"
-                                        }`}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "text"
+                                            ? "bg-white text-black border-white"
+                                            : "border-white/10 hover:bg-white/5"
+                                            }`}
                                         disabled={indexing}
                                     >
                                         Text Only
@@ -1533,11 +1530,10 @@ function App() {
                                     <button
                                         type="button"
                                         onClick={() => setIndexContentType("images")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${
-                                            indexContentType === "images"
-                                                ? "bg-white text-black border-white"
-                                                : "border-white/10 hover:bg-white/5"
-                                        }`}
+                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "images"
+                                            ? "bg-white text-black border-white"
+                                            : "border-white/10 hover:bg-white/5"
+                                            }`}
                                         disabled={indexing}
                                     >
                                         Images Only
@@ -1549,7 +1545,7 @@ function App() {
                                     {indexContentType === "images" && "Index only images from PDFs"}
                                 </p>
                             </div>
-                            
+
                             <div className="flex gap-2">
                                 <button
                                     type="button"
@@ -1613,10 +1609,10 @@ function App() {
                                     <div className="mt-2 text-xs text-gray-500">
                                         {indexProgress.total > 0
                                             ? (
-                                                  (indexProgress.current /
-                                                      indexProgress.total) *
-                                                  100
-                                              ).toFixed(1)
+                                                (indexProgress.current /
+                                                    indexProgress.total) *
+                                                100
+                                            ).toFixed(1)
                                             : "0.0"}
                                         % complete
                                     </div>
@@ -1725,10 +1721,10 @@ function App() {
                                     <div className="mt-2 text-xs text-gray-500">
                                         {updateProgress.total > 0
                                             ? (
-                                                  (updateProgress.current /
-                                                      updateProgress.total) *
-                                                  100
-                                              ).toFixed(1)
+                                                (updateProgress.current /
+                                                    updateProgress.total) *
+                                                100
+                                            ).toFixed(1)
                                             : "0.0"}
                                         % complete
                                     </div>
@@ -1813,7 +1809,7 @@ function App() {
                                 <div className="flex items-center gap-4 text-xs text-gray-400">
                                     {selectedResult.pageNumbers &&
                                         selectedResult.pageNumbers.length >
-                                            0 && (
+                                        0 && (
                                             <span className="bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20 text-blue-400">
                                                 Page{" "}
                                                 {selectedResult.pageNumbers[0]}
@@ -1854,7 +1850,7 @@ function App() {
                         {/* Modal Body */}
                         <div className="flex-1 overflow-y-auto p-6">
                             {selectedResult.contentType === "image" &&
-                            selectedResult.imageData ? (
+                                selectedResult.imageData ? (
                                 <div className="flex flex-col items-center">
                                     <img
                                         src={`data:image/jpeg;base64,${selectedResult.imageData}`}
@@ -1918,9 +1914,9 @@ function App() {
                                     onClick={() =>
                                         window.open(
                                             "/api/file?path=" +
-                                                encodeURIComponent(
-                                                    selectedResult.filePath,
-                                                ),
+                                            encodeURIComponent(
+                                                selectedResult.filePath,
+                                            ),
                                             "_blank",
                                         )
                                     }
@@ -2004,9 +2000,9 @@ function App() {
                                     onClick={() =>
                                         window.open(
                                             "/api/file?path=" +
-                                                encodeURIComponent(
-                                                    pdfPreviewData.filePath,
-                                                ),
+                                            encodeURIComponent(
+                                                pdfPreviewData.filePath,
+                                            ),
                                             "_blank",
                                         )
                                     }
