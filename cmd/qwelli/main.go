@@ -11,6 +11,15 @@ import (
 var version = "0.1.0"
 
 func main() {
+	// If no arguments provided (double-click scenario), default to serve
+	if len(os.Args) == 1 {
+		if err := cli.RunServeDefault(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	rootCmd := &cobra.Command{
 		Use:   "qwelli",
 		Short: "Qwelli - Semantic search for your local files",
