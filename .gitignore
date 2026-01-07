@@ -45,3 +45,4 @@ web/node_modules/
 web/dist/
 web/package-lock.json
 internal/server/web/dist
+internal/server/web/dist/index.html
