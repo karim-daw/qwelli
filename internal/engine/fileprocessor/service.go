@@ -8,7 +8,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine/chunker"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 	"github.com/karim-daw/qwelli/internal/textutil"
 )
 
@@ -32,8 +32,8 @@ func DefaultProcessingConfig() ProcessingConfig {
 // It holds reusable dependencies to avoid repeated allocations
 type FileProcessingService struct {
 	chunkService   *chunker.ChunkService
-	pdfProcessor   *processor.PDFProcessor
-	imageExtractor *processor.ImageExtractor
+	pdfProcessor   *extraction.PDFProcessor
+	imageExtractor *extraction.ImageExtractor
 	config         ProcessingConfig
 }
 
@@ -46,8 +46,8 @@ func (s *FileProcessingService) SetContentTypeMode(mode ContentTypeMode) {
 func NewFileProcessingService(config ProcessingConfig) *FileProcessingService {
 	return &FileProcessingService{
 		chunkService:   chunker.NewChunkService(config.ChunkerConfig),
-		pdfProcessor:   processor.NewPDFProcessor(),
-		imageExtractor: processor.NewImageExtractor(1024, 1024),
+		pdfProcessor:   extraction.NewPDFProcessor(),
+		imageExtractor: extraction.NewImageExtractor(1024, 1024),
 		config:         config,
 	}
 }
@@ -161,7 +161,7 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 	}
 
 	// Only extract images if we need them (not in text-only mode)
-	var images []processor.PDFImage
+	var images []extraction.PDFImage
 	if options.ContentTypeMode != ContentTypeText {
 		// Extract images page-by-page to get correct page numbers
 		for _, page := range pages {
@@ -174,7 +174,7 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 			images = append(images, pageImages...)
 		}
 	} else {
-		images = []processor.PDFImage{}
+		images = []extraction.PDFImage{}
 	}
 
 	// Chunk PDF with multimodal support
