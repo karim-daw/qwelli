@@ -14,8 +14,9 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/engine/indexer"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/embeddings"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 //// asoidjaoisjd
@@ -33,9 +34,18 @@ func main() {
 	// Clean up existing database
 	os.Remove(dbPath)
 
-	// Initialize embedder
+	// Initialize voyage client and embedder
 	fmt.Println("🤖 Initializing embedder...")
-	embedder, err := indexer.NewEmbedder(apiKey, modelName, endpoint)
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            apiKey,
+		EmbeddingModel:    modelName,
+		EmbeddingEndpoint: endpoint,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create voyage client: %v", err)
+	}
+
+	embedder, err := embeddings.NewEmbedder(voyageClient)
 	if err != nil {
 		log.Fatalf("Failed to initialize embedder: %v", err)
 	}
@@ -86,7 +96,7 @@ func main() {
 		}
 
 		// Compute file hash
-		fileHash, err := processor.ComputeSHA256(absPath)
+		fileHash, err := extraction.ComputeSHA256(absPath)
 		if err != nil {
 			log.Printf("⚠️  Failed to compute hash for %s: %v", absPath, err)
 			continue
