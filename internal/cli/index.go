@@ -10,6 +10,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/voyage"
 	"github.com/spf13/cobra"
 )
 
@@ -73,8 +74,18 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 	// Use Voyage provider
 	enableMultimodal := multimodal || cfg.EnableMultimodal
 
-	// Create engine with provider configuration
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, enableMultimodal)
+	// Create voyage client
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create voyage client: %w", err)
+	}
+
+	// Create engine with voyage client
+	eng := engine.NewEngine(voyageClient, enableMultimodal)
 
 	if enableMultimodal {
 		fmt.Printf("🖼️  Multimodal indexing enabled (text + images)\n")
