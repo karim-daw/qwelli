@@ -10,6 +10,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/voyage"
 	"github.com/spf13/cobra"
 )
 
@@ -308,7 +309,16 @@ func runListShell(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create voyage client: %w", err)
+	}
+
+	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
 	cachedIndexList = make([]string, len(files))
 
 	for i, dbFile := range files {
