@@ -21,7 +21,7 @@ import (
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
-	"github.com/karim-daw/qwelli/internal/engine/reranker"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 //go:embed web/dist
@@ -36,7 +36,8 @@ type SearchCacheEntry struct {
 type Server struct {
 	config          *config.Config
 	engine          *engine.Engine
-	reranker        reranker.Provider            // Reranker for search results
+	voyageClient    *voyage.Client // Shared Voyage client for reranking
+	enableReranker  bool
 	port            int
 	progressClients map[string][]chan string // indexPath -> clients listening for progress
 	progressMutex   sync.RWMutex
@@ -48,25 +49,26 @@ type Server struct {
 }
 
 func NewServer(cfg *config.Config, port int) *Server {
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
-
-	// Initialize reranker if enabled
-	var rerankerProvider reranker.Provider
-	if cfg.EnableReranker {
-		if cfg.RerankProvider == "voyage" || cfg.RerankProvider == "" {
-			voyageReranker, err := reranker.NewVoyageProvider(cfg.APIKey, cfg.RerankModel, cfg.RerankEndpoint)
-			if err != nil {
-				log.Printf("⚠️  Failed to initialize reranker: %v (continuing without reranking)", err)
-			} else {
-				rerankerProvider = voyageReranker
-			}
-		}
+	// Create a single shared Voyage client for both embeddings and reranking
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+		RerankModel:       cfg.RerankModel,
+		RerankEndpoint:    cfg.RerankEndpoint,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize Voyage client: %v", err)
 	}
+
+	// Create engine using shared client
+	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
 
 	s := &Server{
 		config:          cfg,
 		engine:          eng,
-		reranker:        rerankerProvider,
+		voyageClient:    voyageClient,
+		enableReranker:  cfg.EnableReranker,
 		port:            port,
 		progressClients: make(map[string][]chan string),
 		searchCache:     make(map[string]*SearchCacheEntry),
@@ -109,8 +111,8 @@ func (s *Server) Start() error {
 	log.Printf("🚀 Server starting on http://localhost%s\n", addr)
 	log.Printf("📂 Index directory: %s\n", s.config.IndexDir)
 	log.Printf("🤖 Model: %s\n", s.config.Model)
-	if s.reranker != nil {
-		log.Printf("🔄 Reranker: enabled (%s)\n", s.reranker.Name())
+	if s.enableReranker {
+		log.Printf("🔄 Reranker: enabled (voyage)\n")
 	}
 
 	return http.ListenAndServe(addr, s.corsMiddleware(mux))
@@ -346,38 +348,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply reranking if enabled
-	if s.reranker != nil && len(engineResults) > 0 {
-		// Convert engine.SearchResult to reranker.SearchResult
-		rerankInput := make([]reranker.SearchResult, len(engineResults))
+	if s.enableReranker && len(engineResults) > 0 {
+		// Extract documents for reranking
+		documents := make([]string, len(engineResults))
 		for i, r := range engineResults {
-			rerankInput[i] = reranker.SearchResult{
-				FilePath:     r.FilePath,
-				FileName:     r.FileName,
-				Distance:     r.Distance,
-				Content:      r.Content,
-				TextMetadata: r.TextMetadata,
-				ImageData:    r.ImageData,
-				PageNumbers:  r.PageNumbers,
-			}
+			documents[i] = r.Content
 		}
 
-		rerankedResults, err := s.reranker.Rerank(r.Context(), query, rerankInput)
+		reranked, err := s.voyageClient.Rerank(r.Context(), query, documents)
 		if err != nil {
 			// Log error but continue with original results
 			log.Printf("⚠️  Reranking failed: %v (using original results)", err)
 		} else {
-			// Convert back to engine.SearchResult
-			for i, rr := range rerankedResults {
-				engineResults[i].FilePath = rr.FilePath
-				engineResults[i].FileName = rr.FileName
-				engineResults[i].Distance = rr.Distance
-				engineResults[i].Content = rr.Content
-				engineResults[i].TextMetadata = rr.TextMetadata
-				engineResults[i].ImageData = rr.ImageData
-				engineResults[i].PageNumbers = rr.PageNumbers
+			// Reorder engineResults based on reranked indices
+			reorderedResults := make([]engine.SearchResult, 0, len(reranked))
+			for _, item := range reranked {
+				if item.Index >= 0 && item.Index < len(engineResults) {
+					result := engineResults[item.Index]
+					// Update distance with negative relevance score (lower is better)
+					result.Distance = -item.RelevanceScore
+					reorderedResults = append(reorderedResults, result)
+				}
 			}
-			// Resize if reranker returned fewer results
-			engineResults = engineResults[:len(rerankedResults)]
+			engineResults = reorderedResults
 		}
 	}
 
