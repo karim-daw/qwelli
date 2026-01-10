@@ -2,28 +2,18 @@ package search
 
 import (
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/engine/indexer"
+	"github.com/karim-daw/qwelli/internal/engine/embeddings"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 // SemanticSearchStrategy performs semantic search using vector embeddings
 type SemanticSearchStrategy struct {
-	apiKey   string
-	model    string
-	endpoint string
+	client *voyage.Client
 }
 
-// NewSemanticSearchStrategy creates a new semantic search strategy
-func NewSemanticSearchStrategy() *SemanticSearchStrategy {
-	return &SemanticSearchStrategy{}
-}
-
-// NewSemanticSearchStrategyWithConfig creates a semantic search strategy with config
-func NewSemanticSearchStrategyWithConfig(apiKey, model, endpoint string) *SemanticSearchStrategy {
-	return &SemanticSearchStrategy{
-		apiKey:   apiKey,
-		model:    model,
-		endpoint: endpoint,
-	}
+// NewSemanticSearchStrategy creates a semantic search strategy with a Voyage client
+func NewSemanticSearchStrategy(client *voyage.Client) *SemanticSearchStrategy {
+	return &SemanticSearchStrategy{client: client}
 }
 
 // Name returns the strategy name
@@ -33,8 +23,7 @@ func (s *SemanticSearchStrategy) Name() string {
 
 // Search performs semantic search using vector embeddings
 func (s *SemanticSearchStrategy) Search(query string, projectDB *db.ProjectDB, topK int, contentType string) ([]db.SearchResult, error) {
-	// Create embedder if not already created
-	embedder, err := indexer.NewEmbedder(s.apiKey, s.model, s.endpoint)
+	embedder, err := embeddings.NewEmbedder(s.client)
 	if err != nil {
 		return nil, err
 	}
