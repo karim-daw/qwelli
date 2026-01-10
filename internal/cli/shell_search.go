@@ -7,6 +7,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 // runSearchShell is a wrapper for runSearch that handles shell-specific setup
@@ -32,8 +33,17 @@ func searchResults(query, dbPath string, topK int, textOnly, imagesOnly bool, st
 		contentType = "image"
 	}
 
-	// Use engine
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
+	// Create voyage client and engine
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create voyage client: %w", err)
+	}
+
+	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
 
 	// Use SearchWithStrategy to support different search methods
 	results, err := eng.SearchWithStrategy(query, dbPath, topK, contentType, strategy)
