@@ -1,7 +1,10 @@
 package search
 
 import (
+	"log"
+
 	"github.com/karim-daw/qwelli/internal/db"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 // SearchStrategy defines the interface for different search strategies
@@ -42,13 +45,24 @@ type Registry struct {
 }
 
 // NewRegistry creates a new search strategy registry with default strategies
-func NewRegistry() *Registry {
-	semantic := NewSemanticSearchStrategy()
+func NewRegistry(client *voyage.Client) *Registry {
 	registry := &Registry{
 		strategies:      make(map[string]SearchStrategy),
 		defaultStrategy: "semantic",
 	}
-	registry.Register("semantic", semantic)
+
+	// Register default strategies
+	if client != nil {
+		log.Printf("Voyage client detected: registering default search strategies")
+		registry.Register("semantic", NewSemanticSearchStrategy(client))
+		registry.Register("hybrid", NewHybridSearchStrategy(
+			NewSemanticSearchStrategy(client),
+			NewKeywordSearchStrategy(),
+		))
+	}
+	log.Println("Warning. Couldnt find client, registering only FTS")
+	registry.Register("keyword", NewKeywordSearchStrategy())
+
 	return registry
 }
 
@@ -70,12 +84,4 @@ func (r *Registry) SetDefault(name string) {
 	if _, ok := r.strategies[name]; ok {
 		r.defaultStrategy = name
 	}
-}
-
-// DefaultRegistry is the default global registry
-var DefaultRegistry = NewRegistry()
-
-// GetStrategy returns a strategy from the default registry
-func GetStrategy(name string) SearchStrategy {
-	return DefaultRegistry.GetStrategy(name)
 }
