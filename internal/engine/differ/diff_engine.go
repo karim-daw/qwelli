@@ -1,4 +1,4 @@
-package scanner
+package differ
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
 // ChangeSet represents files that need to be added, updated, or deleted
@@ -134,7 +134,7 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 				}
 
 				// Mtime changed - verify content hash to be sure
-				currentHash, err := processor.ComputeSHA256(absPath)
+				currentHash, err := extraction.ComputeSHA256(absPath)
 				if err != nil {
 					log.Printf("⚠️  Failed to compute hash for %s: %v", filepath.Base(absPath), err)
 					resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
