@@ -1,4 +1,4 @@
-package engine
+package embeddings
 
 import (
 	"context"
@@ -6,22 +6,21 @@ import (
 	"log"
 
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/engine/indexer"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
 // EmbeddingGenerator handles embedding generation for chunks
 type EmbeddingGenerator struct {
-	embedder         *indexer.Embedder
-	imageValidator   *processor.ImageValidator
+	embedder         *Embedder
+	imageValidator   *extraction.ImageValidator
 	enableMultimodal bool
 }
 
 // NewEmbeddingGenerator creates a new embedding generator
-func NewEmbeddingGenerator(embedder *indexer.Embedder, enableMultimodal bool) *EmbeddingGenerator {
+func NewEmbeddingGenerator(embedder *Embedder, enableMultimodal bool) *EmbeddingGenerator {
 	return &EmbeddingGenerator{
 		embedder:         embedder,
-		imageValidator:   processor.NewImageValidator(),
+		imageValidator:   extraction.NewImageValidator(),
 		enableMultimodal: enableMultimodal,
 	}
 }
@@ -59,7 +58,7 @@ func (g *EmbeddingGenerator) GenerateEmbeddings(ctx context.Context, chunks []db
 
 // generateMultimodalEmbeddings generates embeddings for multimodal chunks (text + images)
 func (g *EmbeddingGenerator) generateMultimodalEmbeddings(ctx context.Context, chunks []db.Chunk, progressCallback func(current, total int)) (map[int][]float32, error) {
-	multimodalInputs := make([]indexer.MultimodalInput, 0, len(chunks))
+	multimodalInputs := make([]MultimodalInput, 0, len(chunks))
 	validChunkIndices := make([]int, 0, len(chunks))
 
 	// Reset validator stats
@@ -69,12 +68,17 @@ func (g *EmbeddingGenerator) generateMultimodalEmbeddings(ctx context.Context, c
 		if chunk.ContentType == "image" {
 			// Image chunk - validate and prepare
 			imageBase64 := string(chunk.ImageData)
-			input, valid := g.imageValidator.ValidateAndPrepare(imageBase64, i)
+			imageData, valid := g.imageValidator.ValidateAndPrepare(imageBase64, i)
 			if !valid {
 				continue
 			}
 
-			multimodalInputs = append(multimodalInputs, *input)
+			multimodalInputs = append(multimodalInputs, MultimodalInput{
+				Type:        "image",
+				ImageBase64: imageData.Base64,
+				ImageFormat: imageData.Format,
+				ImagePixels: imageData.Pixels,
+			})
 			validChunkIndices = append(validChunkIndices, i)
 		} else {
 			// Text chunk - skip if empty
@@ -83,7 +87,7 @@ func (g *EmbeddingGenerator) generateMultimodalEmbeddings(ctx context.Context, c
 				continue
 			}
 
-			multimodalInputs = append(multimodalInputs, indexer.MultimodalInput{
+			multimodalInputs = append(multimodalInputs, MultimodalInput{
 				Type: "text",
 				Text: chunk.Content,
 			})
