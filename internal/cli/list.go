@@ -8,6 +8,7 @@ import (
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/voyage"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,16 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create voyage client: %w", err)
+	}
+
+	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
 
 	for i, dbFile := range files {
 		// Get stats
@@ -110,7 +120,16 @@ func runStatus(indexPath string) error {
 		return fmt.Errorf("index not found for %s. Run 'qwelli index %s' first", absPath, absPath)
 	}
 
-	eng := engine.NewEngine(cfg.APIKey, cfg.Model, cfg.Endpoint, cfg.EnableMultimodal)
+	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create voyage client: %w", err)
+	}
+
+	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
 
 	// Get index status with pending changes
 	status, err := eng.GetIndexStatus(dbPath, absPath)
