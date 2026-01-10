@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
-	"github.com/karim-daw/qwelli/internal/engine/scanner"
+	"github.com/karim-daw/qwelli/internal/engine/differ"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
 func TestDetectChanges(t *testing.T) {
@@ -36,7 +36,7 @@ func TestDetectChanges(t *testing.T) {
 	absFile2, _ := filepath.Abs(file2)
 
 	// Index file1 only
-	hash1, _ := processor.ComputeSHA256(absFile1)
+	hash1, _ := extraction.ComputeSHA256(absFile1)
 	info1, _ := os.Stat(absFile1)
 	file := db.File{
 		FileID:     "f1",
@@ -52,7 +52,7 @@ func TestDetectChanges(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := scanner.DetectChanges(pdb, tmpDir)
+	changes, err := differ.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("detectChanges() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestDetectChanges_ModifiedFile(t *testing.T) {
 	absFile, _ := filepath.Abs(testFile)
 
 	// Index file
-	hash1, _ := processor.ComputeSHA256(absFile)
+	hash1, _ := extraction.ComputeSHA256(absFile)
 	info1, _ := os.Stat(absFile)
 	file := db.File{
 		FileID:     "f1",
@@ -111,7 +111,7 @@ func TestDetectChanges_ModifiedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := scanner.DetectChanges(pdb, tmpDir)
+	changes, err := differ.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
@@ -142,7 +142,7 @@ func TestDetectChanges_DeletedFile(t *testing.T) {
 	absFile, _ := filepath.Abs(testFile)
 
 	// Index file
-	hash1, _ := processor.ComputeSHA256(absFile)
+	hash1, _ := extraction.ComputeSHA256(absFile)
 	info1, _ := os.Stat(absFile)
 	file := db.File{
 		FileID:     "f1",
@@ -163,7 +163,7 @@ func TestDetectChanges_DeletedFile(t *testing.T) {
 	}
 
 	// Detect changes
-	changes, err := scanner.DetectChanges(pdb, tmpDir)
+	changes, err := differ.DetectChanges(pdb, tmpDir)
 	if err != nil {
 		t.Fatalf("DetectChanges() error = %v", err)
 	}
