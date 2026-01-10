@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
 // ChunkService provides a unified interface for all chunking operations
@@ -28,13 +28,13 @@ func (s *ChunkService) ChunkText(text string) ([]Chunk, error) {
 }
 
 // ChunkPDF chunks PDF pages (text only)
-func (s *ChunkService) ChunkPDF(pages []processor.PDFPage, metadata *processor.PDFMetadata, filePath string) ([]Chunk, error) {
+func (s *ChunkService) ChunkPDF(pages []extraction.PDFPage, metadata *extraction.PDFMetadata, filePath string) ([]Chunk, error) {
 	strategy := NewPDFChunkStrategy(metadata, filePath)
 	return strategy.Chunkify(pages, s.config, make(map[string]interface{}))
 }
 
 // ChunkMultimodal chunks PDF with both text and images
-func (s *ChunkService) ChunkMultimodal(pages []processor.PDFPage, images []processor.PDFImage, metadata *processor.PDFMetadata, filePath string) ([]Chunk, error) {
+func (s *ChunkService) ChunkMultimodal(pages []extraction.PDFPage, images []extraction.PDFImage, metadata *extraction.PDFMetadata, filePath string) ([]Chunk, error) {
 	var allChunks []Chunk
 
 	// First, get text chunks from PDF strategy

@@ -6,19 +6,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 	"github.com/karim-daw/qwelli/internal/textutil"
 )
 
 // PDFChunkStrategy implements chunking for PDF pages
 // This strategy processes PDF pages and preserves page number context
 type PDFChunkStrategy struct {
-	metadata *processor.PDFMetadata
+	metadata *extraction.PDFMetadata
 	filePath string
 }
 
 // NewPDFChunkStrategy creates a new PDF chunking strategy
-func NewPDFChunkStrategy(metadata *processor.PDFMetadata, filePath string) *PDFChunkStrategy {
+func NewPDFChunkStrategy(metadata *extraction.PDFMetadata, filePath string) *PDFChunkStrategy {
 	return &PDFChunkStrategy{
 		metadata: metadata,
 		filePath: filePath,
@@ -26,7 +26,7 @@ func NewPDFChunkStrategy(metadata *processor.PDFMetadata, filePath string) *PDFC
 }
 
 func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, baseMetadata map[string]interface{}) ([]Chunk, error) {
-	pages, ok := content.([]processor.PDFPage)
+	pages, ok := content.([]extraction.PDFPage)
 	if !ok {
 		return nil, &StrategyError{Message: "PDFChunkStrategy requires []PDFPage content"}
 	}

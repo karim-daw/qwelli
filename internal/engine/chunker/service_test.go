@@ -3,7 +3,7 @@ package chunker
 import (
 	"testing"
 
-	"github.com/karim-daw/qwelli/internal/engine/processor"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
 func TestNewChunkService(t *testing.T) {
@@ -60,12 +60,12 @@ func TestChunkService_ChunkPDF(t *testing.T) {
 	service := NewChunkService(DefaultConfig)
 
 	// Create test PDF pages
-	pages := []processor.PDFPage{
+	pages := []extraction.PDFPage{
 		{PageNumber: 1, Text: "This is page one content."},
 		{PageNumber: 2, Text: "This is page two content."},
 	}
 
-	metadata := &processor.PDFMetadata{
+	metadata := &extraction.PDFMetadata{
 		Title:     "Test PDF",
 		PageCount: 2,
 	}
@@ -91,12 +91,12 @@ func TestChunkService_ChunkMultimodal(t *testing.T) {
 	service := NewChunkService(DefaultConfig)
 
 	// Create test PDF pages
-	pages := []processor.PDFPage{
+	pages := []extraction.PDFPage{
 		{PageNumber: 1, Text: "This is page one content."},
 	}
 
 	// Create test images
-	images := []processor.PDFImage{
+	images := []extraction.PDFImage{
 		{
 			PageNumber: 1,
 			Width:      1000,
@@ -106,7 +106,7 @@ func TestChunkService_ChunkMultimodal(t *testing.T) {
 		},
 	}
 
-	metadata := &processor.PDFMetadata{
+	metadata := &extraction.PDFMetadata{
 		Title:     "Test PDF",
 		PageCount: 1,
 	}
