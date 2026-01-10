@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
+	"github.com/karim-daw/qwelli/internal/engine/differ"
+	"github.com/karim-daw/qwelli/internal/engine/embeddings"
+	"github.com/karim-daw/qwelli/internal/engine/extraction"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
-	"github.com/karim-daw/qwelli/internal/engine/indexer"
-	"github.com/karim-daw/qwelli/internal/engine/processor"
-	"github.com/karim-daw/qwelli/internal/engine/scanner"
 	"github.com/karim-daw/qwelli/internal/engine/search"
+	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 type SearchResult struct {
@@ -28,27 +29,28 @@ type SearchResult struct {
 }
 
 type Engine struct {
-	apiKey                string
-	model                 string
-	endpoint              string
+	voyageClient          *voyage.Client
 	enableMultimodal      bool
 	contentTypeMode       fileprocessor.ContentTypeMode
 	fileProcessingService *fileprocessor.FileProcessingService
 }
 
-func NewEngine(apiKey, model, endpoint string, enableMultimodal bool) *Engine {
-	// Create file processing service with default config
+// NewEngine creates an engine using a Voyage client
+func NewEngine(voyageClient *voyage.Client, enableMultimodal bool) *Engine {
 	processingConfig := fileprocessor.DefaultProcessingConfig()
 	processingConfig.EnableMultimodal = enableMultimodal
 
 	return &Engine{
-		apiKey:                apiKey,
-		model:                 model,
-		endpoint:              endpoint,
+		voyageClient:          voyageClient,
 		enableMultimodal:      enableMultimodal,
-		contentTypeMode:       fileprocessor.ContentTypeBoth, // Default to both
+		contentTypeMode:       fileprocessor.ContentTypeBoth,
 		fileProcessingService: fileprocessor.NewFileProcessingService(processingConfig),
 	}
+}
+
+// getEmbedder returns an embedder using the voyage client
+func (e *Engine) getEmbedder() (*embeddings.Embedder, error) {
+	return embeddings.NewEmbedder(e.voyageClient)
 }
 
 // SetContentTypeMode sets the content type mode for indexing
@@ -67,7 +69,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	}
 
 	// Detect dimension
-	embedder, err := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
+	embedder, err := e.getEmbedder()
 	if err != nil {
 		return err
 	}
@@ -78,13 +80,14 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	dimension := len(testEmbed)
 
 	// Check if model changed - if so, delete DB to start fresh
+	currentModel := e.voyageClient.EmbeddingModel()
 	if existingDim, err := db.GetDimensionFromDB(dbPath); err == nil {
 		tempDB, _ := db.OpenProjectDB(dbPath, existingDim)
 		if tempDB != nil {
 			storedModel, _ := tempDB.GetMetadata("model")
 			tempDB.Close()
-			if storedModel != "" && storedModel != e.model {
-				fmt.Printf("⚠️  Model changed from '%s' to '%s' - recreating database...\n", storedModel, e.model)
+			if storedModel != "" && storedModel != currentModel {
+				fmt.Printf("⚠️  Model changed from '%s' to '%s' - recreating database...\n", storedModel, currentModel)
 				os.Remove(dbPath)
 			}
 		}
@@ -99,7 +102,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 
 	// Store project metadata
 	projectDB.SetMetadata("dimension", fmt.Sprintf("%d", dimension))
-	projectDB.SetMetadata("model", e.model)
+	projectDB.SetMetadata("model", currentModel)
 	projectDB.SetMetadata("folder_path", folderPath)
 
 	// Determine which files to process
@@ -109,7 +112,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	// if incremental, detect changes
 	if incremental {
 		// Detect changes
-		changes, err := scanner.DetectChanges(projectDB, folderPath)
+		changes, err := differ.DetectChanges(projectDB, folderPath)
 		if err != nil {
 			return fmt.Errorf("failed to detect changes: %w", err)
 		}
@@ -148,7 +151,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		}
 	} else {
 		// Full index: process all files
-		allFiles, err := scanner.ScanFolder(folderPath)
+		allFiles, err := differ.ScanFolder(folderPath)
 		if err != nil {
 			return err
 		}
@@ -191,7 +194,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		}
 
 		// Compute file hash
-		fileHash, err := processor.ComputeSHA256(absPath)
+		fileHash, err := extraction.ComputeSHA256(absPath)
 		if err != nil {
 			// Check if it's an OneDrive I/O error
 			if strings.Contains(err.Error(), "OneDrive placeholder") || strings.Contains(err.Error(), "input/output error") {
@@ -208,11 +211,11 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		}
 
 		// Create file record
-		fileID := scanner.GenerateFileID(absPath)
+		fileID := differ.GenerateFileID(absPath)
 		file := db.File{
 			FileID:     fileID,
 			Path:       absPath,
-			FileType:   scanner.GetFileTypeFromPath(absPath),
+			FileType:   differ.GetFileTypeFromPath(absPath),
 			FileHash:   fileHash,
 			ModifiedAt: info.ModTime(),
 			Size:       info.Size(),
@@ -300,7 +303,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			emitPhase("embedding", fmt.Sprintf("Generating embeddings: %d/%d chunks", current, total), current, total)
 		}
 
-		embeddingGen := NewEmbeddingGenerator(embedder, e.enableMultimodal)
+		embeddingGen := embeddings.NewEmbeddingGenerator(embedder, e.enableMultimodal)
 		embeddingMap, err := embeddingGen.GenerateEmbeddings(ctx, allChunks, embeddingProgressCallback)
 		if err != nil {
 			// Check if error is due to cancellation
@@ -317,7 +320,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		log.Printf("💾 Storing chunks and embeddings in database...")
 		emitPhase("storing", fmt.Sprintf("Storing %d chunks and embeddings", len(allChunks)), 0, len(allChunks))
 		storeStart := time.Now()
-		if err := StoreChunksAndEmbeddings(projectDB, allChunks, embeddingMap); err != nil {
+		if err := embeddings.StoreChunksAndEmbeddings(projectDB, allChunks, embeddingMap); err != nil {
 			return fmt.Errorf("failed to store chunks and embeddings: %w", err)
 		}
 		log.Printf("✅ Stored in %v", time.Since(storeStart))
@@ -365,25 +368,30 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	// Get the search strategy
 	var strategy search.SearchStrategy
 
+	// Helper to create semantic strategy using the voyage client
+	createSemanticStrategy := func() *search.SemanticSearchStrategy {
+		return search.NewSemanticSearchStrategy(e.voyageClient)
+	}
+
 	switch strategyName {
 	case "semantic":
-		strategy = search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
+		strategy = createSemanticStrategy()
 	case "keyword":
 		strategy = search.NewKeywordSearchStrategy()
 	case "hybrid":
-		semantic := search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
+		semantic := createSemanticStrategy()
 		keyword := search.NewKeywordSearchStrategy()
 		strategy = search.NewHybridSearchStrategy(semantic, keyword)
 	default:
 		// Fall back to semantic
-		strategy = search.NewSemanticSearchStrategyWithConfig(e.apiKey, e.model, e.endpoint)
+		strategy = createSemanticStrategy()
 	}
 
 	// Open database - we need dimension, so try to get it from DB first
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		// If dimension not found, we need to create embedder to get dimension
-		embedder, err2 := indexer.NewEmbedder(e.apiKey, e.model, e.endpoint)
+		embedder, err2 := e.getEmbedder()
 		if err2 != nil {
 			return nil, fmt.Errorf("failed to get dimension: %w", err)
 		}
@@ -478,7 +486,7 @@ func (e *Engine) GetFolderPath(dbPath string) (string, error) {
 }
 
 // GetIndexStatus returns the status of an index showing pending changes
-func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus, error) {
+func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus, error) {
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -490,15 +498,15 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus
 	defer projectDB.Close()
 
 	// Detect changes
-	changes, err := scanner.DetectChanges(projectDB, folderPath)
+	changes, err := differ.DetectChanges(projectDB, folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect changes: %w", err)
 	}
 
-	status := &scanner.IndexStatus{
-		ToAdd:    make([]scanner.FileStatus, 0),
-		ToUpdate: make([]scanner.FileStatus, 0),
-		ToDelete: make([]scanner.FileStatus, 0),
+	status := &differ.IndexStatus{
+		ToAdd:    make([]differ.FileStatus, 0),
+		ToUpdate: make([]differ.FileStatus, 0),
+		ToDelete: make([]differ.FileStatus, 0),
 	}
 
 	// Populate ToAdd
@@ -507,9 +515,9 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus
 		if err != nil {
 			continue
 		}
-		status.ToAdd = append(status.ToAdd, scanner.FileStatus{
+		status.ToAdd = append(status.ToAdd, differ.FileStatus{
 			Path:       path,
-			FileType:   scanner.GetFileTypeFromPath(path),
+			FileType:   differ.GetFileTypeFromPath(path),
 			Size:       info.Size(),
 			ModifiedAt: info.ModTime(),
 			Reason:     "new",
@@ -522,9 +530,9 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus
 		if err != nil {
 			continue
 		}
-		status.ToUpdate = append(status.ToUpdate, scanner.FileStatus{
+		status.ToUpdate = append(status.ToUpdate, differ.FileStatus{
 			Path:       path,
-			FileType:   scanner.GetFileTypeFromPath(path),
+			FileType:   differ.GetFileTypeFromPath(path),
 			Size:       info.Size(),
 			ModifiedAt: info.ModTime(),
 			Reason:     "modified",
@@ -537,7 +545,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*scanner.IndexStatus
 		if err != nil {
 			continue
 		}
-		status.ToDelete = append(status.ToDelete, scanner.FileStatus{
+		status.ToDelete = append(status.ToDelete, differ.FileStatus{
 			Path:       path,
 			FileType:   file.FileType,
 			Size:       file.Size,
