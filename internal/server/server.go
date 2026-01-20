@@ -85,6 +85,10 @@ func NewServer(cfg *config.Config, port int) *Server {
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	// Health check endpoint (for Docker/K8s)
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReadiness)
+
 	// API endpoints
 	mux.HandleFunc("/api/indexes", s.handleListIndexes)
 	mux.HandleFunc("/api/search", s.handleSearch)
@@ -1178,5 +1182,69 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Index deleted successfully",
 		"path":    req.IndexPath,
+	})
+}
+
+// handleHealth returns basic health status (liveness probe)
+// This endpoint checks if the server is running
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "healthy",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// handleReadiness returns readiness status (readiness probe)
+// This endpoint checks if the server can handle requests
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Check if database type is PostgreSQL and verify connection
+	if s.config.Database.Type == "postgres" {
+		// Try to create a temporary database connection to verify PostgreSQL is accessible
+		pgCfg := db.PostgresConfig{
+			Host:     s.config.Database.Host,
+			Port:     s.config.Database.Port,
+			User:     s.config.Database.User,
+			Password: s.config.Database.Password,
+			DBName:   s.config.Database.DBName,
+			SSLMode:  s.config.Database.SSLMode,
+			MaxConns: 1,
+			MaxIdle:  1,
+		}
+
+		// Try to connect with a short timeout
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		testDB, err := db.NewPostgresDB(ctx, pgCfg, 1024)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "not_ready",
+				"reason":  "database_unavailable",
+				"error":   err.Error(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		defer testDB.Close()
+	}
+
+	// Server is ready
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "ready",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"config": map[string]interface{}{
+			"database_type":      s.config.Database.Type,
+			"embedding_model":    s.config.Model,
+			"multimodal_enabled": s.config.EnableMultimodal,
+			"reranker_enabled":   s.enableReranker,
+		},
 	})
 }

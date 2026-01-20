@@ -1,0 +1,75 @@
+# Network Policy for enhanced security
+# This restricts pod-to-pod communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: qwelli-network-policy
+  namespace: qwelli
+spec:
+  podSelector:
+    matchLabels:
+      app: qwelli
+  policyTypes:
+    - Ingress
+    - Egress
+
+  # Ingress rules - what can connect TO qwelli pods
+  ingress:
+    # Allow traffic from other qwelli pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app: qwelli
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Allow traffic from ingress controller / load balancer
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  # Egress rules - what qwelli pods can connect TO
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+        - podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # Allow PostgreSQL in Azure (VNet)
+    - to:
+        - ipBlock:
+            cidr: 10.241.0.0/24  # Database subnet
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Allow HTTPS to Voyage AI API
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+
+    # Allow HTTP within cluster
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
