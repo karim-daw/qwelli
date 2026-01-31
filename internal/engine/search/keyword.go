@@ -1,6 +1,8 @@
 package search
 
 import (
+	"context"
+
 	"github.com/karim-daw/qwelli/internal/db"
 )
 
@@ -26,5 +28,5 @@ func (s *KeywordSearchStrategy) Name() string {
 // 4. Content type filtering
 // 5. Top-K result limiting
 func (s *KeywordSearchStrategy) Search(query string, projectDB *db.ProjectDB, topK int, contentType string) ([]db.SearchResult, error) {
-	return projectDB.SearchFTS(query, topK, contentType)
+	return projectDB.SearchFTS(context.Background(), query, topK, contentType)
 }

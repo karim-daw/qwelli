@@ -1,6 +1,8 @@
 package search
 
 import (
+	"context"
+
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine/embeddings"
 	"github.com/karim-daw/qwelli/internal/voyage"
@@ -35,8 +37,9 @@ func (s *SemanticSearchStrategy) Search(query string, projectDB *db.ProjectDB, t
 	}
 
 	// Perform ANN search
+	ctx := context.Background()
 	if contentType != "" {
-		return projectDB.SearchANNWithFilter(queryVec, topK, contentType)
+		return projectDB.SearchANNWithFilter(ctx, queryVec, topK, contentType)
 	}
-	return projectDB.SearchANN(queryVec, topK)
+	return projectDB.SearchANN(ctx, queryVec, topK)
 }

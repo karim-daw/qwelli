@@ -58,7 +58,7 @@ func runSearch(query, indexPath string, topK int, textOnly, imagesOnly bool, str
 		return err
 	}
 
-	dbPath := filepath.Join(cfg.IndexDir, generateDBName(absPath))
+	dbPath := filepath.Join(cfg.DatabaseURL, generateDBName(absPath))
 
 	// Determine content type filter
 	contentType := ""

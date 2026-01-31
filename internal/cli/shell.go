@@ -44,7 +44,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 		fmt.Printf("⚠️  Warning: %v\n", err)
 		fmt.Println("Run 'init' to set up configuration first")
 	} else {
-		fmt.Printf("📊 Current model: %s\n\n", cfg.Model)
+		fmt.Printf("📊 Current model: %s\n\n", cfg.VoyageModel)
 	}
 
 	fmt.Println("🔍 Qwelli Interactive Shell")
@@ -187,15 +187,10 @@ func runShell(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			if len(cmdArgs) == 0 {
-				fmt.Printf("📊 Current model: %s\n", cfg.Model)
+				fmt.Printf("📊 Current model: %s\n", cfg.VoyageModel)
 			} else {
-				cfg.Model = cmdArgs[0]
-				if err := cfg.Save(); err != nil {
-					fmt.Printf("❌ Error: %v\n", err)
-				} else {
-					fmt.Printf("✅ Model changed to: %s\n", cfg.Model)
-					fmt.Println("⚠️  Re-index to use the new model")
-				}
+				fmt.Printf("⚠️  Model configuration is now via environment variable VOYAGE_MODEL\n")
+				fmt.Printf("   Set VOYAGE_MODEL=%s in your .env file\n", cmdArgs[0])
 			}
 
 		case "delete", "remove", "rm":
@@ -295,7 +290,7 @@ func runListShell(_ *cobra.Command, _ []string) error {
 	}
 
 	// List all .db files in index directory
-	files, err := filepath.Glob(filepath.Join(cfg.IndexDir, "*.db"))
+	files, err := filepath.Glob(filepath.Join(cfg.DatabaseURL, "*.db"))
 	if err != nil {
 		return fmt.Errorf("failed to list indexes: %w", err)
 	}
@@ -310,15 +305,15 @@ func runListShell(_ *cobra.Command, _ []string) error {
 	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
 
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageModel,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
 	}
 
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
+	eng := engine.NewEngine(voyageClient, true)
 	cachedIndexList = make([]string, len(files))
 
 	for i, dbFile := range files {

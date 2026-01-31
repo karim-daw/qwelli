@@ -1,36 +1,37 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 // SearchFTS performs full-text search using keyword matching with relevance scoring
-// Uses LIKE queries with TF-IDF-like scoring for ranking
-func (p *ProjectDB) SearchFTS(query string, k int, contentType string) ([]SearchResult, error) {
+// Uses PostgreSQL's ILIKE for case-insensitive pattern matching with TF-IDF-like scoring
+func (db *DB) SearchFTS(ctx context.Context, query string, k int, contentType string) ([]SearchResult, error) {
 	// Tokenize query into keywords (split by spaces, remove empty)
-	keywords := tokenizeQuery(query)
+	keywords := tokenizeQueryCommon(query)
 	if len(keywords) == 0 {
 		return []SearchResult{}, nil
 	}
 
-	// Build content type filter
+	// Build content type filter as WHERE condition
 	contentTypeFilter := ""
 	if contentType != "" {
-		contentTypeFilter = fmt.Sprintf(" AND content_type = '%s'", contentType)
+		contentTypeFilter = " AND content_type = $2"
 	}
 
-	// Build LIKE conditions for each keyword
-	// We'll search for keywords in the content field (case-insensitive)
-	// DuckDB uses ? for placeholders, but we'll use string formatting for LIKE patterns
-	// to avoid SQL injection while keeping it simple
+	// Build ILIKE conditions for each keyword
+	// PostgreSQL uses $N for placeholders, we'll use ILIKE for case-insensitive matching
 	likeConditions := make([]string, len(keywords))
-
 	for i, keyword := range keywords {
-		// Escape single quotes in keyword for SQL safety
-		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
-		// Use LIKE with escaped pattern
-		likeConditions[i] = fmt.Sprintf("LOWER(content) LIKE LOWER('%%%s%%')", escapedKeyword)
+		// Escape special characters for LIKE pattern
+		escapedKeyword := escapeLikePatternPostgres(keyword)
+		// Use ILIKE (case-insensitive LIKE)
+		likeConditions[i] = fmt.Sprintf("content ILIKE '%%%s%%'", escapedKeyword)
 	}
 
 	// Build WHERE clause combining all keywords with AND (all must match)
@@ -39,19 +40,13 @@ func (p *ProjectDB) SearchFTS(query string, k int, contentType string) ([]Search
 		whereClause += contentTypeFilter
 	}
 
-	// Calculate relevance score using a simple TF-IDF-like approach
+	// Calculate relevance score using a TF-IDF-like approach
 	// Score = sum of (keyword matches * weight) for each keyword
-	// Weight decreases for common words (simple IDF approximation)
-	scoreExpr := buildRelevanceScore(keywords)
+	scoreExpr := buildRelevanceScorePostgresSQL(keywords)
 
 	// Query with relevance scoring
-	// We normalize the relevance score to a 0-1 range, then convert to distance
+	// Convert relevance score to distance: distance = 1.0 / (1.0 + relevance_score)
 	// Higher relevance = lower distance (better match)
-	// Use a sigmoid-like function: distance = 1.0 / (1.0 + relevance_score)
-	// This ensures:
-	// - relevance_score = 0 → distance = 1.0 (no match)
-	// - relevance_score = 1 → distance = 0.5 (moderate match)
-	// - relevance_score = 10 → distance ≈ 0.09 (excellent match)
 	queryStr := fmt.Sprintf(`
 		WITH scored_chunks AS (
 			SELECT
@@ -81,10 +76,18 @@ func (p *ProjectDB) SearchFTS(query string, k int, contentType string) ([]Search
 			(1.0 / (1.0 + relevance_score)) AS distance
 		FROM scored_chunks
 		ORDER BY relevance_score DESC
-		LIMIT ?
+		LIMIT $1
 	`, scoreExpr, whereClause)
 
-	rows, err := p.conn.Query(queryStr, k)
+	var rows *sql.Rows
+	var err error
+
+	if contentType != "" {
+		rows, err = db.QueryContext(ctx, queryStr, k, contentType)
+	} else {
+		rows, err = db.QueryContext(ctx, queryStr, k)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("FTS query failed: %w", err)
 	}
@@ -93,30 +96,37 @@ func (p *ProjectDB) SearchFTS(query string, k int, contentType string) ([]Search
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		var pageNumbersIface interface{}
-		var imageData []byte
-		var contentTypeStr string
+		var pageNumbers pq.Int64Array
 
-		if err := rows.Scan(&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
-			&r.ChunkIndex, &r.TotalChunks, &pageNumbersIface, &contentTypeStr, &imageData, &r.Distance); err != nil {
-			return nil, err
+		err := rows.Scan(
+			&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
+			&r.ChunkIndex, &r.TotalChunks, &pageNumbers,
+			&r.ContentType, &r.ImageData, &r.Distance,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan FTS result: %w", err)
 		}
 
-		// Parse page_numbers array
-		r.PageNumbers = parsePageNumbers(pageNumbersIface)
-		r.ContentType = contentTypeStr
+		// Convert pq.Int64Array to []int
+		r.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
+
+		// Set default content type if empty
 		if r.ContentType == "" {
 			r.ContentType = "text"
 		}
-		r.ImageData = imageData
+
 		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating FTS results: %w", err)
 	}
 
 	return results, nil
 }
 
-// tokenizeQuery splits a query into keywords, normalizing and filtering
-func tokenizeQuery(query string) []string {
+// tokenizeQueryCommon splits a query into keywords, normalizing and filtering
+func tokenizeQueryCommon(query string) []string {
 	// Convert to lowercase and split by whitespace
 	words := strings.Fields(strings.ToLower(query))
 
@@ -141,12 +151,20 @@ func tokenizeQuery(query string) []string {
 	return keywords
 }
 
-// buildRelevanceScore creates a SQL expression for calculating relevance
-// Uses a simple TF-IDF-like scoring:
-// - Term Frequency (TF): Count of keyword matches in content
-// - Inverse Document Frequency (IDF): Weight based on keyword length and rarity
-// - Score = sum of (TF * IDF) for all keywords
-func buildRelevanceScore(keywords []string) string {
+// escapeLikePatternPostgres escapes special characters in LIKE patterns for PostgreSQL
+func escapeLikePatternPostgres(s string) string {
+	// Escape special LIKE characters: %, _, \
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	// Escape single quotes for SQL string literal
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
+}
+
+// buildRelevanceScorePostgresSQL creates a SQL expression for calculating relevance
+// Uses a TF-IDF-like scoring
+func buildRelevanceScorePostgresSQL(keywords []string) string {
 	scoreParts := make([]string, len(keywords))
 
 	for i, keyword := range keywords {
@@ -154,15 +172,12 @@ func buildRelevanceScore(keywords []string) string {
 		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
 
 		// Calculate TF: count occurrences of keyword in content (case-insensitive)
-		// Use LENGTH and REPLACE to count occurrences
 		tfExpr := fmt.Sprintf(
-			"(LENGTH(LOWER(content)) - LENGTH(REPLACE(LOWER(content), LOWER('%s'), ''))) / LENGTH('%s')",
+			"(LENGTH(content) - LENGTH(REPLACE(LOWER(content), LOWER('%s'), '')))::FLOAT / LENGTH('%s')",
 			escapedKeyword, escapedKeyword,
 		)
 
 		// Calculate IDF: weight based on keyword length
-		// Longer keywords are more specific and should have higher weight
-		// Base weight: 1.0 + (length - 2) * 0.5, capped at reasonable max
 		idfWeight := 1.0 + float64(len(keyword)-2)*0.5
 		if idfWeight < 1.0 {
 			idfWeight = 1.0

@@ -84,7 +84,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	if existingDim, err := db.GetDimensionFromDB(dbPath); err == nil {
 		tempDB, _ := db.OpenProjectDB(dbPath, existingDim)
 		if tempDB != nil {
-			storedModel, _ := tempDB.GetMetadata("model")
+			storedModel, _ := tempDB.GetMetadata(context.Background(), "model")
 			tempDB.Close()
 			if storedModel != "" && storedModel != currentModel {
 				fmt.Printf("⚠️  Model changed from '%s' to '%s' - recreating database...\n", storedModel, currentModel)
@@ -101,9 +101,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	defer projectDB.Close()
 
 	// Store project metadata
-	projectDB.SetMetadata("dimension", fmt.Sprintf("%d", dimension))
-	projectDB.SetMetadata("model", currentModel)
-	projectDB.SetMetadata("folder_path", folderPath)
+	projectDB.SetMetadata(context.Background(), "dimension", fmt.Sprintf("%d", dimension))
+	projectDB.SetMetadata(context.Background(), "model", currentModel)
+	projectDB.SetMetadata(context.Background(), "folder_path", folderPath)
 
 	// Determine which files to process
 	var filesToProcess []string
@@ -119,9 +119,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 
 		// Delete removed files
 		for _, path := range changes.ToDelete {
-			file, err := projectDB.GetFileByPath(path)
+			file, err := projectDB.GetFileByPath(context.Background(), path)
 			if err == nil {
-				if err := projectDB.DeleteFile(file.FileID); err != nil {
+				if err := projectDB.DeleteFile(context.Background(), file.FileID); err != nil {
 					log.Printf("⚠️  Failed to delete file %s: %v", path, err)
 				} else {
 					needsRebuild = true
@@ -135,9 +135,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 
 		// For updated files, delete existing data first
 		for _, path := range changes.ToUpdate {
-			file, err := projectDB.GetFileByPath(path)
+			file, err := projectDB.GetFileByPath(context.Background(), path)
 			if err == nil {
-				if err := projectDB.DeleteFile(file.FileID); err != nil {
+				if err := projectDB.DeleteFile(context.Background(), file.FileID); err != nil {
 					log.Printf("⚠️  Failed to delete old file data %s: %v", path, err)
 				} else {
 					needsRebuild = true
@@ -222,7 +222,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			IndexedAt:  time.Now(),
 		}
 
-		if err := projectDB.InsertFile(file); err != nil {
+		if err := projectDB.InsertFile(context.Background(), file); err != nil {
 			log.Printf("⚠️  Failed to insert file %s: %v", absPath, err)
 			continue
 		}
@@ -332,7 +332,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		log.Printf("🔨 Rebuilding HNSW index...")
 		emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
 		indexStart := time.Now()
-		if err := projectDB.RebuildHNSWIndex(); err != nil {
+		if err := projectDB.RebuildHNSWIndex(context.Background()); err != nil {
 			return fmt.Errorf("failed to rebuild HNSW index: %w", err)
 		}
 		log.Printf("✅ HNSW index rebuilt in %v", time.Since(indexStart))
@@ -455,14 +455,14 @@ func (e *Engine) GetIndexStats(dbPath string) (int, error) {
 	defer projectDB.Close()
 
 	// Count chunks (which have embeddings)
-	files, err := projectDB.GetAllFiles()
+	files, err := projectDB.GetAllFiles(context.Background())
 	if err != nil {
 		return 0, err
 	}
 
 	totalChunks := 0
 	for _, file := range files {
-		chunks, err := projectDB.GetChunksForFile(file.FileID)
+		chunks, err := projectDB.GetChunksForFile(context.Background(), file.FileID)
 		if err != nil {
 			continue
 		}
@@ -482,7 +482,7 @@ func (e *Engine) GetFolderPath(dbPath string) (string, error) {
 		return "", err
 	}
 	defer projectDB.Close()
-	return projectDB.GetMetadata("folder_path")
+	return projectDB.GetMetadata(context.Background(), "folder_path")
 }
 
 // GetIndexStatus returns the status of an index showing pending changes
@@ -541,7 +541,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 
 	// Populate ToDelete
 	for _, path := range changes.ToDelete {
-		file, err := projectDB.GetFileByPath(path)
+		file, err := projectDB.GetFileByPath(context.Background(), path)
 		if err != nil {
 			continue
 		}
@@ -555,7 +555,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 	}
 
 	// Get total counts
-	allFiles, err := projectDB.GetAllFiles()
+	allFiles, err := projectDB.GetAllFiles(context.Background())
 	if err != nil {
 		return nil, err
 	}

@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +13,7 @@ func NewInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize qwelli configuration",
-		Long:  "Set up your qwelli configuration including API keys and preferences",
+		Long:  "Set up your qwelli configuration using environment variables",
 		RunE:  runInit,
 	}
 }
@@ -23,78 +22,47 @@ func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("🚀 Welcome to Qwelli!")
-	fmt.Println("Let's set up your configuration.")
+	fmt.Println("Qwelli now uses environment variables for configuration.")
+	fmt.Println()
 
-	// Start with defaults
-	cfg := config.DefaultConfig()
+	// Collect required configuration
+	fmt.Print("Enter your PostgreSQL connection string\n")
+	fmt.Print("(format: postgresql://user:password@host:port/database): ")
+	dbURL, _ := reader.ReadString('\n')
+	dbURL = strings.TrimSpace(dbURL)
+	if dbURL == "" {
+		return fmt.Errorf("database URL is required")
+	}
 
-	// Use Voyage AI as the provider
-	cfg.EmbeddingProvider = "voyage"
-	defaultModel := "voyage-multimodal-3"
-	defaultEndpoint := "https://api.voyageai.com/v1/multimodalembeddings"
-	cfg.EnableMultimodal = true
-
-	// Ask for API key
-	fmt.Print("Enter your Voyage AI API key: ")
+	fmt.Print("\nEnter your Voyage AI API key: ")
 	apiKey, _ := reader.ReadString('\n')
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return fmt.Errorf("API key is required")
 	}
-	cfg.APIKey = apiKey
 
-	// Ask for model (with default based on provider)
-	if defaultModel != "" {
-		cfg.Model = defaultModel
-	}
-	fmt.Printf("Enter embedding model [%s]: ", cfg.Model)
-	model, _ := reader.ReadString('\n')
-	model = strings.TrimSpace(model)
-	if model != "" {
-		cfg.Model = model
-	}
+	// Create .env file
+	envContent := fmt.Sprintf(`# Qwelli Configuration
+DATABASE_URL=%s
+VOYAGE_API_KEY=%s
 
-	// Ask for endpoint (with default based on provider)
-	if defaultEndpoint != "" {
-		cfg.Endpoint = defaultEndpoint
-	}
-	fmt.Printf("Enter API endpoint [%s]: ", cfg.Endpoint)
-	endpoint, _ := reader.ReadString('\n')
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint != "" {
-		cfg.Endpoint = endpoint
+# Optional (with defaults)
+VOYAGE_MODEL=voyage-multimodal-3
+PORT=8080
+ENABLE_RERANKER=true
+`, dbURL, apiKey)
+
+	envFile := ".env"
+	if err := os.WriteFile(envFile, []byte(envContent), 0600); err != nil {
+		return fmt.Errorf("failed to create .env file: %w", err)
 	}
 
-	// Ask about multimodal (default enabled for Voyage)
-	fmt.Print("Enable multimodal indexing (extract images from PDFs)? [Y/n]: ")
-	multimodalInput, _ := reader.ReadString('\n')
-	multimodalInput = strings.TrimSpace(strings.ToLower(multimodalInput))
-	if multimodalInput == "n" || multimodalInput == "no" {
-		cfg.EnableMultimodal = false
-	}
-
-	// Ask about reranker (default enabled for Voyage)
-	fmt.Print("Enable AI reranking (improves search result relevance)? [Y/n]: ")
-	rerankInput, _ := reader.ReadString('\n')
-	rerankInput = strings.TrimSpace(strings.ToLower(rerankInput))
-	if rerankInput == "n" || rerankInput == "no" {
-		cfg.EnableReranker = false
-	}
-
-	// Save configuration
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	// Create index directory
-	if err := cfg.EnsureIndexDir(); err != nil {
-		return fmt.Errorf("failed to create index directory: %w", err)
-	}
-
-	fmt.Println("\n✅ Configuration saved!")
-	fmt.Printf("📁 Config file: %s\n", config.ConfigPath())
-	fmt.Printf("📁 Index directory: %s\n", cfg.IndexDir)
-	fmt.Println("\nYou can now run 'qwelli index <folder>' to start indexing!")
+	fmt.Println("\n✅ Configuration saved to .env file!")
+	fmt.Println("📁 File: .env")
+	fmt.Println("\nYou can now run:")
+	fmt.Println("  qwelli index <folder>  - Index a folder")
+	fmt.Println("  qwelli serve           - Start the web server")
+	fmt.Println("\nNote: Make sure your PostgreSQL database is running and accessible!")
 
 	return nil
 }

@@ -3,11 +3,8 @@ package cli
 import (
 	"bufio"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -37,53 +34,14 @@ func runDelete(indexPath string, force bool) error {
 		return fmt.Errorf("invalid index path: %w", err)
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
-
-	// Check if database exists
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("index not found for %s", absPath)
-		}
-		return fmt.Errorf("failed to check index: %w", err)
-	}
-
-	// Show what will be deleted
-	fmt.Printf("📊 Index to delete:\n\n")
-	fmt.Printf("   📁 Folder: %s\n", absPath)
-	fmt.Printf("   💾 Database: %s\n", dbPath)
-	fmt.Printf("   💽 Size: %.2f MB\n", float64(info.Size())/(1024*1024))
-	fmt.Println()
-
-	// Ask for confirmation unless force flag is set
-	if !force {
-		fmt.Print("⚠️  Are you sure you want to delete this index? This cannot be undone. (yes/no): ")
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read response: %w", err)
-		}
-
-		response = strings.ToLower(strings.TrimSpace(response))
-		if response != "yes" && response != "y" {
-			fmt.Println("❌ Deletion cancelled")
-			return nil
-		}
-	}
-
-	// Delete the database file
-	if err := os.Remove(dbPath); err != nil {
-		return fmt.Errorf("failed to delete index: %w", err)
-	}
-
-	fmt.Printf("✅ Index deleted successfully: %s\n", absPath)
-	return nil
+	// With PostgreSQL, we delete indexed files from the database
+	// For now, this command is simplified - in the future we could delete by folder path
+	fmt.Printf("⚠️  Delete functionality with PostgreSQL is not yet implemented.\n")
+	fmt.Printf("   Folder path: %s\n", absPath)
+	fmt.Printf("\n")
+	fmt.Printf("To manually delete, connect to your PostgreSQL database and run:\n")
+	fmt.Printf("   DELETE FROM files WHERE path LIKE '%s%%';\n", absPath)
+	return fmt.Errorf("delete not yet implemented for PostgreSQL")
 }
 
 // deleteIndexInteractive is used by the shell command
@@ -93,46 +51,8 @@ func deleteIndexInteractive(indexPath string, reader *bufio.Reader) error {
 		return fmt.Errorf("invalid index path: %w", err)
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
-
-	// Check if database exists
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("index not found for %s", absPath)
-		}
-		return fmt.Errorf("failed to check index: %w", err)
-	}
-
-	// Show what will be deleted
-	fmt.Printf("📊 Index to delete:\n\n")
-	fmt.Printf("   📁 Folder: %s\n", absPath)
-	fmt.Printf("   💾 Database: %s\n", dbPath)
-	fmt.Printf("   💽 Size: %.2f MB\n\n", float64(info.Size())/(1024*1024))
-
-	// Ask for confirmation
-	fmt.Print("⚠️  Are you sure you want to delete this index? Type 'yes' to confirm: ")
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	response = strings.ToLower(strings.TrimSpace(response))
-	if response != "yes" {
-		return fmt.Errorf("deletion cancelled (you must type 'yes' to confirm)")
-	}
-
-	// Delete the database file
-	if err := os.Remove(dbPath); err != nil {
-		return fmt.Errorf("failed to delete index: %w", err)
-	}
-
-	fmt.Printf("✅ Index deleted successfully: %s\n", absPath)
-	return nil
+	// Delete not yet implemented for PostgreSQL
+	fmt.Printf("⚠️  Delete functionality with PostgreSQL is not yet implemented.\n")
+	fmt.Printf("   Folder path: %s\n", absPath)
+	return fmt.Errorf("delete not yet implemented for PostgreSQL")
 }

@@ -17,7 +17,7 @@ func runSearchShell(query, indexPath string, topK int, textOnly, imagesOnly bool
 		return err
 	}
 
-	dbPath := filepath.Join(cfg.IndexDir, generateDBName(indexPath))
+	dbPath := filepath.Join(cfg.DatabaseURL, generateDBName(indexPath))
 	return searchResults(query, dbPath, topK, textOnly, imagesOnly, strategy, cfg)
 }
 
@@ -35,15 +35,15 @@ func searchResults(query, dbPath string, topK int, textOnly, imagesOnly bool, st
 
 	// Create voyage client and engine
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageModel,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
 	}
 
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
+	eng := engine.NewEngine(voyageClient, true)
 
 	// Use SearchWithStrategy to support different search methods
 	results, err := eng.SearchWithStrategy(query, dbPath, topK, contentType, strategy)

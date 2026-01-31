@@ -1,152 +1,148 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
-	"strings"
-	"time"
+
+	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"github.com/pgvector/pgvector-go"
 )
 
 // File CRUD operations
 
-func (p *ProjectDB) InsertFile(file File) error {
-	_, err := p.conn.Exec(`
-		INSERT INTO files (file_id, path, file_type, file_hash, modified_at, size, indexed_at)
+// InsertFile creates or updates a file record
+func (db *DB) InsertFile(ctx context.Context, file File) error {
+	// Generate UUID if not provided
+	if file.FileID == "" {
+		file.FileID = uuid.New().String()
+	}
+
+	query := `
+		INSERT INTO files (file_id, path, file_type, file_hash, size, modified_at, indexed_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (file_id) DO UPDATE SET
-			path = EXCLUDED.path,
+		ON CONFLICT (path)
+		DO UPDATE SET
 			file_type = EXCLUDED.file_type,
 			file_hash = EXCLUDED.file_hash,
-			modified_at = EXCLUDED.modified_at,
 			size = EXCLUDED.size,
-			indexed_at = EXCLUDED.indexed_at`,
+			modified_at = EXCLUDED.modified_at,
+			indexed_at = EXCLUDED.indexed_at
+		RETURNING file_id`
+
+	err := db.QueryRowContext(ctx, query,
 		file.FileID, file.Path, file.FileType, file.FileHash,
-		file.ModifiedAt.Format("2006-01-02 15:04:05"),
-		file.Size, file.IndexedAt.Format("2006-01-02 15:04:05"),
+		file.Size, file.ModifiedAt, file.IndexedAt).Scan(&file.FileID)
+
+	if err != nil {
+		return fmt.Errorf("failed to insert file: %w", err)
+	}
+
+	return nil
+}
+
+// GetFile retrieves a file by ID
+func (db *DB) GetFile(ctx context.Context, fileID string) (*File, error) {
+	query := `
+		SELECT file_id, path, file_type, file_hash, modified_at, size, indexed_at
+		FROM files WHERE file_id = $1`
+
+	var f File
+	err := db.QueryRowContext(ctx, query, fileID).Scan(
+		&f.FileID, &f.Path, &f.FileType, &f.FileHash,
+		&f.ModifiedAt, &f.Size, &f.IndexedAt,
 	)
-	return err
-}
 
-func (p *ProjectDB) GetFile(fileID string) (*File, error) {
-	row := p.conn.QueryRow(`
-		SELECT file_id, path, file_type, file_hash, modified_at, size, indexed_at
-		FROM files WHERE file_id = $1
-	`, fileID)
-
-	var f File
-	var modifiedAtStr, indexedAtStr string
-	if err := row.Scan(&f.FileID, &f.Path, &f.FileType, &f.FileHash,
-		&modifiedAtStr, &f.Size, &indexedAtStr); err != nil {
-		return nil, err
-	}
-
-	var err error
-	f.ModifiedAt, err = parseTime(modifiedAtStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse modified_at: %w", err)
-	}
-	f.IndexedAt, err = parseTime(indexedAtStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse indexed_at: %w", err)
+		return nil, fmt.Errorf("failed to get file: %w", err)
 	}
 
 	return &f, nil
 }
 
-func (p *ProjectDB) GetFileByPath(path string) (*File, error) {
-	row := p.conn.QueryRow(`
+// GetFileByPath retrieves a file by path
+func (db *DB) GetFileByPath(ctx context.Context, path string) (*File, error) {
+	query := `
 		SELECT file_id, path, file_type, file_hash, modified_at, size, indexed_at
-		FROM files WHERE path = $1
-	`, path)
+		FROM files WHERE path = $1`
 
 	var f File
-	var modifiedAtStr, indexedAtStr string
-	if err := row.Scan(&f.FileID, &f.Path, &f.FileType, &f.FileHash,
-		&modifiedAtStr, &f.Size, &indexedAtStr); err != nil {
-		return nil, err
-	}
+	err := db.QueryRowContext(ctx, query, path).Scan(
+		&f.FileID, &f.Path, &f.FileType, &f.FileHash,
+		&f.ModifiedAt, &f.Size, &f.IndexedAt,
+	)
 
-	var err error
-	f.ModifiedAt, err = parseTime(modifiedAtStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse modified_at: %w", err)
-	}
-	f.IndexedAt, err = parseTime(indexedAtStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse indexed_at: %w", err)
+		return nil, fmt.Errorf("failed to get file by path: %w", err)
 	}
 
 	return &f, nil
 }
 
-func (p *ProjectDB) GetAllFiles() ([]File, error) {
-	rows, err := p.conn.Query(`
+// GetAllFiles retrieves all files ordered by path
+func (db *DB) GetAllFiles(ctx context.Context) ([]File, error) {
+	query := `
 		SELECT file_id, path, file_type, file_hash, modified_at, size, indexed_at
-		FROM files ORDER BY path
-	`)
+		FROM files ORDER BY path`
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query files: %w", err)
 	}
 	defer rows.Close()
 
 	var files []File
 	for rows.Next() {
 		var f File
-		var modifiedAtStr, indexedAtStr string
-		if err := rows.Scan(&f.FileID, &f.Path, &f.FileType, &f.FileHash,
-			&modifiedAtStr, &f.Size, &indexedAtStr); err != nil {
-			return nil, err
-		}
-
-		var err error
-		f.ModifiedAt, err = parseTime(modifiedAtStr)
+		err := rows.Scan(
+			&f.FileID, &f.Path, &f.FileType, &f.FileHash,
+			&f.ModifiedAt, &f.Size, &f.IndexedAt,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse modified_at: %w", err)
+			return nil, fmt.Errorf("failed to scan file: %w", err)
 		}
-		f.IndexedAt, err = parseTime(indexedAtStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse indexed_at: %w", err)
-		}
-
 		files = append(files, f)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating files: %w", err)
+	}
+
 	return files, nil
 }
 
-// DeleteFile deletes a file and all associated chunks and embeddings (manual cascade)
-func (p *ProjectDB) DeleteFile(fileID string) error {
-	tx, err := p.conn.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// DeleteFile deletes a file and all associated chunks and embeddings
+// PostgreSQL handles cascade deletion automatically via foreign keys
+func (db *DB) DeleteFile(ctx context.Context, fileID string) error {
+	query := `DELETE FROM files WHERE file_id = $1`
 
-	// Delete in order: embeddings → chunks → file
-	_, err = tx.Exec(`
-		DELETE FROM embeddings
-		WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE file_id = $1)
-	`, fileID)
-	if err != nil {
-		return fmt.Errorf("failed to delete embeddings: %w", err)
-	}
-
-	_, err = tx.Exec("DELETE FROM chunks WHERE file_id = $1", fileID)
-	if err != nil {
-		return fmt.Errorf("failed to delete chunks: %w", err)
-	}
-
-	_, err = tx.Exec("DELETE FROM files WHERE file_id = $1", fileID)
+	result, err := db.ExecContext(ctx, query, fileID)
 	if err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	return tx.Commit()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
 
 // Chunk operations
 
-func (p *ProjectDB) InsertChunk(chunk Chunk) error {
-	// Convert page_numbers []int to DuckDB array format
-	pageNumbersStr := formatIntArray(chunk.PageNumbers)
+// InsertChunk creates a new chunk
+func (db *DB) InsertChunk(ctx context.Context, chunk Chunk) (string, error) {
+	// Generate UUID if not provided
+	chunkID := chunk.ChunkID
+	if chunkID == "" {
+		chunkID = uuid.New().String()
+	}
 
 	// Set default content_type if not set
 	contentType := chunk.ContentType
@@ -154,13 +150,14 @@ func (p *ProjectDB) InsertChunk(chunk Chunk) error {
 		contentType = "text"
 	}
 
-	_, err := p.conn.Exec(`
+	query := `
 		INSERT INTO chunks (
 			chunk_id, file_id, file_path, file_type,
-			chunk_index, total_chunks, content,
-			page_numbers, content_type, image_data
+			chunk_index, total_chunks, content, page_numbers,
+			content_type, image_data
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (chunk_id) DO UPDATE SET
+		ON CONFLICT (chunk_id)
+		DO UPDATE SET
 			file_id = EXCLUDED.file_id,
 			file_path = EXCLUDED.file_path,
 			file_type = EXCLUDED.file_type,
@@ -169,207 +166,189 @@ func (p *ProjectDB) InsertChunk(chunk Chunk) error {
 			content = EXCLUDED.content,
 			page_numbers = EXCLUDED.page_numbers,
 			content_type = EXCLUDED.content_type,
-			image_data = EXCLUDED.image_data`,
-		chunk.ChunkID, chunk.FileID, chunk.FilePath, chunk.FileType,
+			image_data = EXCLUDED.image_data`
+
+	_, err := db.ExecContext(ctx, query,
+		chunkID, chunk.FileID, chunk.FilePath, chunk.FileType,
 		chunk.ChunkIndex, chunk.TotalChunks, chunk.Content,
-		pageNumbersStr, contentType, chunk.ImageData,
+		pq.Array(chunk.PageNumbers), contentType, chunk.ImageData,
 	)
-	return err
+
+	if err != nil {
+		return "", fmt.Errorf("failed to insert chunk: %w", err)
+	}
+
+	return chunkID, nil
 }
 
-func (p *ProjectDB) GetChunk(chunkID string) (*Chunk, error) {
-	row := p.conn.QueryRow(`
+// GetChunk retrieves a chunk by ID
+func (db *DB) GetChunk(ctx context.Context, chunkID string) (*Chunk, error) {
+	query := `
 		SELECT chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
 			page_numbers, content_type, image_data
-		FROM chunks WHERE chunk_id = $1
-	`, chunkID)
+		FROM chunks WHERE chunk_id = $1`
 
 	var c Chunk
-	var pageNumbersIface interface{}
-	var imageData []byte
+	var pageNumbers pq.Int64Array
 
-	if err := row.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
+	err := db.QueryRowContext(ctx, query, chunkID).Scan(
+		&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
 		&c.ChunkIndex, &c.TotalChunks, &c.Content,
-		&pageNumbersIface, &c.ContentType, &imageData); err != nil {
-		return nil, err
+		&pageNumbers, &c.ContentType, &c.ImageData,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chunk: %w", err)
 	}
 
-	c.ImageData = imageData
+	// Convert pq.Int64Array to []int
+	c.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
+
 	if c.ContentType == "" {
 		c.ContentType = "text"
 	}
 
-	c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)
 	return &c, nil
 }
 
-func (p *ProjectDB) GetChunksForFile(fileID string) ([]Chunk, error) {
-	rows, err := p.conn.Query(`
+// GetChunksForFile retrieves all chunks for a file ordered by chunk index
+func (db *DB) GetChunksForFile(ctx context.Context, fileID string) ([]Chunk, error) {
+	query := `
 		SELECT chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
 			page_numbers, content_type, image_data
-		FROM chunks WHERE file_id = $1 ORDER BY chunk_index
-	`, fileID)
+		FROM chunks WHERE file_id = $1 ORDER BY chunk_index`
+
+	rows, err := db.QueryContext(ctx, query, fileID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query chunks: %w", err)
 	}
 	defer rows.Close()
 
 	var chunks []Chunk
 	for rows.Next() {
 		var c Chunk
-		var pageNumbersIface interface{}
-		var imageData []byte
+		var pageNumbers pq.Int64Array
 
-		if err := rows.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
+		err := rows.Scan(
+			&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
 			&c.ChunkIndex, &c.TotalChunks, &c.Content,
-			&pageNumbersIface, &c.ContentType, &imageData); err != nil {
-			return nil, err
+			&pageNumbers, &c.ContentType, &c.ImageData,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan chunk: %w", err)
 		}
 
-		c.ImageData = imageData
+		c.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
+
 		if c.ContentType == "" {
 			c.ContentType = "text"
 		}
 
-		c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)
 		chunks = append(chunks, c)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating chunks: %w", err)
+	}
+
 	return chunks, nil
 }
 
 // GetChunksByType returns chunks filtered by content type for a specific file
-func (p *ProjectDB) GetChunksByType(contentType string, fileID string) ([]Chunk, error) {
-	rows, err := p.conn.Query(`
+func (db *DB) GetChunksByType(ctx context.Context, contentType string, fileID string) ([]Chunk, error) {
+	query := `
 		SELECT chunk_id, file_id, file_path, file_type,
 			chunk_index, total_chunks, content,
 			page_numbers, content_type, image_data
-		FROM chunks WHERE file_id = $1 AND content_type = $2 ORDER BY chunk_index
-	`, fileID, contentType)
+		FROM chunks
+		WHERE file_id = $1 AND content_type = $2
+		ORDER BY chunk_index`
+
+	rows, err := db.QueryContext(ctx, query, fileID, contentType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query chunks by type: %w", err)
 	}
 	defer rows.Close()
 
 	var chunks []Chunk
 	for rows.Next() {
 		var c Chunk
-		var pageNumbersIface interface{}
-		var imageData []byte
+		var pageNumbers pq.Int64Array
 
-		if err := rows.Scan(&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
+		err := rows.Scan(
+			&c.ChunkID, &c.FileID, &c.FilePath, &c.FileType,
 			&c.ChunkIndex, &c.TotalChunks, &c.Content,
-			&pageNumbersIface, &c.ContentType, &imageData); err != nil {
-			return nil, err
+			&pageNumbers, &c.ContentType, &c.ImageData,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan chunk: %w", err)
 		}
 
-		c.ImageData = imageData
+		c.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
+
 		if c.ContentType == "" {
 			c.ContentType = "text"
 		}
 
-		c.PageNumbers = parsePageNumbersFromIface(pageNumbersIface)
 		chunks = append(chunks, c)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating chunks: %w", err)
+	}
+
 	return chunks, nil
 }
 
 // Embedding operations
 
-func (p *ProjectDB) InsertEmbedding(emb Embedding) error {
-	vecStr := vectorToString(emb.Vector)
-	_, err := p.conn.Exec(
-		fmt.Sprintf(`INSERT INTO embeddings (chunk_id, vector) VALUES ($1, %s::FLOAT[%d])
-			ON CONFLICT (chunk_id) DO UPDATE SET vector = EXCLUDED.vector`, vecStr, p.Dimension),
-		emb.ChunkID,
-	)
-	return err
+// InsertEmbedding stores a vector embedding for a chunk
+func (db *DB) InsertEmbedding(ctx context.Context, chunkID string, vector []float32) error {
+	query := `
+		INSERT INTO embeddings (chunk_id, embedding)
+		VALUES ($1, $2)
+		ON CONFLICT (chunk_id)
+		DO UPDATE SET embedding = EXCLUDED.embedding`
+
+	_, err := db.ExecContext(ctx, query, chunkID, pgvector.NewVector(vector))
+	if err != nil {
+		return fmt.Errorf("failed to insert embedding: %w", err)
+	}
+
+	return nil
+}
+
+// GetEmbedding retrieves a vector embedding for a chunk
+func (db *DB) GetEmbedding(ctx context.Context, chunkID string) (*Embedding, error) {
+	query := `SELECT chunk_id, embedding FROM embeddings WHERE chunk_id = $1`
+
+	var e Embedding
+	var vec pgvector.Vector
+
+	err := db.QueryRowContext(ctx, query, chunkID).Scan(&e.ChunkID, &vec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get embedding: %w", err)
+	}
+
+	e.Vector = vec.Slice()
+
+	return &e, nil
 }
 
 // Helper functions
 
-// parseTime tries multiple time formats to parse a timestamp string
-func parseTime(timeStr string) (time.Time, error) {
-	timeFormats := []string{
-		"2006-01-02 15:04:05",
-		time.RFC3339,
-		time.RFC3339Nano,
+// convertInt64ArrayToIntSlice converts pq.Int64Array to []int
+func convertInt64ArrayToIntSlice(arr pq.Int64Array) []int {
+	if arr == nil {
+		return []int{}
 	}
 
-	for _, format := range timeFormats {
-		if t, err := time.Parse(format, timeStr); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("failed to parse time: %s", timeStr)
-}
-
-// formatIntArray converts []int to DuckDB array string format [1,2,3]
-func formatIntArray(arr []int) string {
-	if len(arr) == 0 {
-		return "[]"
-	}
-	str := "["
+	result := make([]int, len(arr))
 	for i, v := range arr {
-		if i > 0 {
-			str += ","
-		}
-		str += fmt.Sprintf("%d", v)
-	}
-	str += "]"
-	return str
-}
-
-// parsePageNumbersFromIface parses DuckDB array (can be []interface{} or string) into []int
-func parsePageNumbersFromIface(iface interface{}) []int {
-	if iface == nil {
-		return []int{}
+		result[i] = int(v)
 	}
 
-	// Handle []interface{} from DuckDB
-	if arr, ok := iface.([]interface{}); ok {
-		result := make([]int, 0, len(arr))
-		for _, v := range arr {
-			switch val := v.(type) {
-			case int:
-				result = append(result, val)
-			case int64:
-				result = append(result, int(val))
-			case float64:
-				result = append(result, int(val))
-			}
-		}
-		return result
-	}
-
-	// Handle string format (fallback)
-	if s, ok := iface.(string); ok {
-		return parseIntArrayFromString(s)
-	}
-
-	return []int{}
-}
-
-// parseIntArrayFromString parses DuckDB array string format [1,2,3] into []int
-func parseIntArrayFromString(s string) []int {
-	if s == "" || s == "[]" {
-		return []int{}
-	}
-	// Remove brackets
-	s = strings.Trim(s, "[]")
-	if s == "" {
-		return []int{}
-	}
-	// Split by comma and parse
-	parts := strings.Split(s, ",")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		var val int
-		if _, err := fmt.Sscanf(part, "%d", &val); err == nil {
-			result = append(result, val)
-		}
-	}
 	return result
 }
