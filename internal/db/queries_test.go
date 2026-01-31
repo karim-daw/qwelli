@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestInsertChunk_TextChunk(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -46,12 +47,13 @@ func TestInsertChunk_TextChunk(t *testing.T) {
 		ImageData:   nil,
 	}
 
-	if err := pdb.InsertChunk(textChunk); err != nil {
+	_, err = pdb.InsertChunk(context.Background(), textChunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() error = %v", err)
 	}
 
 	// Retrieve and verify
-	retrieved, err := pdb.GetChunk(textChunk.ChunkID)
+	retrieved, err := pdb.GetChunk(context.Background(), textChunk.ChunkID)
 	if err != nil {
 		t.Fatalf("GetChunk() error = %v", err)
 	}
@@ -88,7 +90,7 @@ func TestInsertChunk_DefaultContentType(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -105,11 +107,12 @@ func TestInsertChunk_DefaultContentType(t *testing.T) {
 		PageNumbers: []int{},
 	}
 
-	if err := pdb.InsertChunk(chunk); err != nil {
+	_, err = pdb.InsertChunk(context.Background(), chunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() error = %v", err)
 	}
 
-	retrieved, err := pdb.GetChunk(chunk.ChunkID)
+	retrieved, err := pdb.GetChunk(context.Background(), chunk.ChunkID)
 	if err != nil {
 		t.Fatalf("GetChunk() error = %v", err)
 	}
@@ -140,7 +143,7 @@ func TestGetChunksForFile_MixedContentTypes(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -183,13 +186,14 @@ func TestGetChunksForFile_MixedContentTypes(t *testing.T) {
 	}
 
 	for _, c := range chunks {
-		if err := pdb.InsertChunk(c); err != nil {
+		_, err = pdb.InsertChunk(context.Background(), c)
+		if err != nil {
 			t.Fatalf("InsertChunk() error = %v", err)
 		}
 	}
 
 	// Get all chunks for file
-	fileChunks, err := pdb.GetChunksForFile(testFile.FileID)
+	fileChunks, err := pdb.GetChunksForFile(context.Background(), testFile.FileID)
 	if err != nil {
 		t.Fatalf("GetChunksForFile() error = %v", err)
 	}
@@ -236,7 +240,7 @@ func TestSearchANNWithFilter_ContentTypeFilter(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -266,33 +270,26 @@ func TestSearchANNWithFilter_ContentTypeFilter(t *testing.T) {
 		PageNumbers: []int{1},
 	}
 
-	if err := pdb.InsertChunk(textChunk); err != nil {
+	_, err = pdb.InsertChunk(context.Background(), textChunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() text error = %v", err)
 	}
-	if err := pdb.InsertChunk(imageChunk); err != nil {
+	_, err = pdb.InsertChunk(context.Background(), imageChunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() image error = %v", err)
 	}
 
 	// Insert embeddings
-	textEmbedding := Embedding{
-		ChunkID: textChunk.ChunkID,
-		Vector:  []float32{0.1, 0.2, 0.3, 0.4},
-	}
-	imageEmbedding := Embedding{
-		ChunkID: imageChunk.ChunkID,
-		Vector:  []float32{0.5, 0.6, 0.7, 0.8},
-	}
-
-	if err := pdb.InsertEmbedding(textEmbedding); err != nil {
+	if err := pdb.InsertEmbedding(context.Background(), textChunk.ChunkID, []float32{0.1, 0.2, 0.3, 0.4}); err != nil {
 		t.Fatalf("InsertEmbedding() text error = %v", err)
 	}
-	if err := pdb.InsertEmbedding(imageEmbedding); err != nil {
+	if err := pdb.InsertEmbedding(context.Background(), imageChunk.ChunkID, []float32{0.5, 0.6, 0.7, 0.8}); err != nil {
 		t.Fatalf("InsertEmbedding() image error = %v", err)
 	}
 
 	// Test filtering by text only
 	queryVec := []float32{0.1, 0.2, 0.3, 0.4}
-	textResults, err := pdb.SearchANNWithFilter(queryVec, 10, "text")
+	textResults, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 10, "text")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() text error = %v", err)
 	}
@@ -307,7 +304,7 @@ func TestSearchANNWithFilter_ContentTypeFilter(t *testing.T) {
 	}
 
 	// Test filtering by image only
-	imageResults, err := pdb.SearchANNWithFilter(queryVec, 10, "image")
+	imageResults, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 10, "image")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() image error = %v", err)
 	}
@@ -322,7 +319,7 @@ func TestSearchANNWithFilter_ContentTypeFilter(t *testing.T) {
 	}
 
 	// Test no filter (should return both)
-	allResults, err := pdb.SearchANNWithFilter(queryVec, 10, "")
+	allResults, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 10, "")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() all error = %v", err)
 	}
@@ -353,7 +350,7 @@ func TestInsertChunk_EmptyPageNumbers(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -369,11 +366,12 @@ func TestInsertChunk_EmptyPageNumbers(t *testing.T) {
 		PageNumbers: []int{}, // Empty array
 	}
 
-	if err := pdb.InsertChunk(chunk); err != nil {
+	_, err = pdb.InsertChunk(context.Background(), chunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() error = %v", err)
 	}
 
-	retrieved, err := pdb.GetChunk(chunk.ChunkID)
+	retrieved, err := pdb.GetChunk(context.Background(), chunk.ChunkID)
 	if err != nil {
 		t.Fatalf("GetChunk() error = %v", err)
 	}
@@ -394,7 +392,7 @@ func TestGetChunk_NonExistent(t *testing.T) {
 	}
 	defer pdb.Close()
 
-	_, err = pdb.GetChunk("non-existent-chunk-id")
+	_, err = pdb.GetChunk(context.Background(), "non-existent-chunk-id")
 	if err == nil {
 		t.Error("Expected error for non-existent chunk, got nil")
 	}

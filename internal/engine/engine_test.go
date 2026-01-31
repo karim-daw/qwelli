@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,7 +48,7 @@ func TestDetectChanges(t *testing.T) {
 		Size:       info1.Size(),
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -100,7 +101,7 @@ func TestDetectChanges_ModifiedFile(t *testing.T) {
 		Size:       info1.Size(),
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -153,7 +154,7 @@ func TestDetectChanges_DeletedFile(t *testing.T) {
 		Size:       info1.Size(),
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestSearchFTS(t *testing.T) {
 		Size:       100,
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -67,13 +68,14 @@ func TestSearchFTS(t *testing.T) {
 	}
 
 	for _, c := range chunks {
-		if err := pdb.InsertChunk(c); err != nil {
+		_, err = pdb.InsertChunk(context.Background(), c)
+		if err != nil {
 			t.Fatalf("InsertChunk() error = %v", err)
 		}
 	}
 
 	// Test 1: Search for "machine learning"
-	results, err := pdb.SearchFTS("machine learning", 5, "")
+	results, err := pdb.SearchFTS(context.Background(), "machine learning", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() error = %v", err)
 	}
@@ -95,7 +97,7 @@ func TestSearchFTS(t *testing.T) {
 	}
 
 	// Test 2: Search for "neural networks"
-	results, err = pdb.SearchFTS("neural networks", 5, "")
+	results, err = pdb.SearchFTS(context.Background(), "neural networks", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() neural networks error = %v", err)
 	}
@@ -105,7 +107,7 @@ func TestSearchFTS(t *testing.T) {
 	}
 
 	// Test 3: Search with content type filter
-	results, err = pdb.SearchFTS("learning", 5, "text")
+	results, err = pdb.SearchFTS(context.Background(), "learning", 5, "text")
 	if err != nil {
 		t.Fatalf("SearchFTS() with filter error = %v", err)
 	}
@@ -118,7 +120,7 @@ func TestSearchFTS(t *testing.T) {
 	}
 
 	// Test 4: Empty query
-	results, err = pdb.SearchFTS("", 5, "")
+	results, err = pdb.SearchFTS(context.Background(), "", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() empty query error = %v", err)
 	}
@@ -127,7 +129,7 @@ func TestSearchFTS(t *testing.T) {
 	}
 
 	// Test 5: Query with only stop words
-	results, err = pdb.SearchFTS("the and or", 5, "")
+	results, err = pdb.SearchFTS(context.Background(), "the and or", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() stop words error = %v", err)
 	}
@@ -158,7 +160,7 @@ func TestTokenizeQuery(t *testing.T) {
 		Size:       100,
 		IndexedAt:  time.Now(),
 	}
-	pdb.InsertFile(file)
+	pdb.InsertFile(context.Background(), file)
 
 	chunk := Chunk{
 		ChunkID:     "c1",
@@ -171,10 +173,10 @@ func TestTokenizeQuery(t *testing.T) {
 		PageNumbers: []int{},
 		ContentType: "text",
 	}
-	pdb.InsertChunk(chunk)
+	pdb.InsertChunk(context.Background(), chunk)
 
 	// Test that punctuation is handled
-	results, err := pdb.SearchFTS("python, programming!", 5, "")
+	results, err := pdb.SearchFTS(context.Background(), "python, programming!", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() with punctuation error = %v", err)
 	}
@@ -183,7 +185,7 @@ func TestTokenizeQuery(t *testing.T) {
 	}
 
 	// Test case insensitivity
-	results, err = pdb.SearchFTS("PYTHON PROGRAMMING", 5, "")
+	results, err = pdb.SearchFTS(context.Background(), "PYTHON PROGRAMMING", 5, "")
 	if err != nil {
 		t.Fatalf("SearchFTS() uppercase error = %v", err)
 	}
