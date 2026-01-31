@@ -17,7 +17,7 @@ type SearchStrategy interface {
 	// query: the search query string
 	// projectDB: the database connection
 	// topK: number of results to return
-	// contentType: optional filter ("text", "image", or "")
+	// contentType: DEPRECATED - always searches all content (multimodal mode)
 	Search(query string, projectDB *db.ProjectDB, topK int, contentType string) ([]db.SearchResult, error)
 
 	// Name returns the strategy name for identification
@@ -26,14 +26,14 @@ type SearchStrategy interface {
 
 // SearchOptions contains options for search strategies
 type SearchOptions struct {
-	ContentType string // Optional: "text", "image", or ""
+	ContentType string // DEPRECATED: always "" in multimodal mode
 	TopK        int    // Number of results
 }
 
 // DefaultSearchOptions returns default search options
 func DefaultSearchOptions() SearchOptions {
 	return SearchOptions{
-		ContentType: "",
+		ContentType: "", // Always empty in multimodal mode
 		TopK:        5,
 	}
 }

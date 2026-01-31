@@ -25,8 +25,8 @@ func (s *KeywordSearchStrategy) Name() string {
 // 1. Query tokenization (splitting into keywords, removing stop words)
 // 2. LIKE-based matching (case-insensitive)
 // 3. TF-IDF-like relevance scoring
-// 4. Content type filtering
-// 5. Top-K result limiting
+// 4. Top-K result limiting
+// Note: Content type filtering removed (multimodal mode searches all content)
 func (s *KeywordSearchStrategy) Search(query string, projectDB *db.ProjectDB, topK int, contentType string) ([]db.SearchResult, error) {
-	return projectDB.SearchFTS(context.Background(), query, topK, contentType)
+	return projectDB.SearchFTS(context.Background(), query, topK, "") // Always search all content
 }

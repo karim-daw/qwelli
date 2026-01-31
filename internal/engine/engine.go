@@ -30,20 +30,16 @@ type SearchResult struct {
 
 type Engine struct {
 	voyageClient          *voyage.Client
-	enableMultimodal      bool
-	contentTypeMode       fileprocessor.ContentTypeMode
 	fileProcessingService *fileprocessor.FileProcessingService
 }
 
-// NewEngine creates an engine using a Voyage client
-func NewEngine(voyageClient *voyage.Client, enableMultimodal bool) *Engine {
+// NewEngine creates an engine using a Voyage client (always multimodal now)
+func NewEngine(voyageClient *voyage.Client, _ bool) *Engine {
 	processingConfig := fileprocessor.DefaultProcessingConfig()
-	processingConfig.EnableMultimodal = enableMultimodal
+	processingConfig.EnableMultimodal = true // Always enabled
 
 	return &Engine{
 		voyageClient:          voyageClient,
-		enableMultimodal:      enableMultimodal,
-		contentTypeMode:       fileprocessor.ContentTypeBoth,
 		fileProcessingService: fileprocessor.NewFileProcessingService(processingConfig),
 	}
 }
@@ -53,11 +49,9 @@ func (e *Engine) getEmbedder() (*embeddings.Embedder, error) {
 	return embeddings.NewEmbedder(e.voyageClient)
 }
 
-// SetContentTypeMode sets the content type mode for indexing
+// SetContentTypeMode is deprecated - multimodal is always enabled
 func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
-	e.contentTypeMode = mode
-	// Update the file processing service config
-	e.fileProcessingService.SetContentTypeMode(mode)
+	// No-op: multimodal is always enabled now
 }
 
 func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string), phaseCallback ...func(phase, message string, current, total int)) error {
@@ -303,7 +297,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			emitPhase("embedding", fmt.Sprintf("Generating embeddings: %d/%d chunks", current, total), current, total)
 		}
 
-		embeddingGen := embeddings.NewEmbeddingGenerator(embedder, e.enableMultimodal)
+		embeddingGen := embeddings.NewEmbeddingGenerator(embedder, true)
 		embeddingMap, err := embeddingGen.GenerateEmbeddings(ctx, allChunks, embeddingProgressCallback)
 		if err != nil {
 			// Check if error is due to cancellation
@@ -357,14 +351,16 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 	return e.SearchWithStrategy(query, dbPath, topK, "", "semantic")
 }
 
-// SearchWithFilter performs a search with content type filtering using the default (semantic) strategy
+// SearchWithFilter is deprecated - use SearchWithStrategy instead (content type filtering removed)
 func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, contentType string) ([]SearchResult, error) {
-	return e.SearchWithStrategy(query, dbPath, topK, contentType, "semantic")
+	return e.SearchWithStrategy(query, dbPath, topK, "", "semantic")
 }
 
 // SearchWithStrategy performs a search using the specified strategy
 // strategy can be "semantic", "keyword", or "hybrid"
+// Note: contentType parameter is deprecated (always searches all content in multimodal mode)
 func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
+	// Ignore contentType - multimodal searches all content
 	// Get the search strategy
 	var strategy search.SearchStrategy
 
@@ -408,8 +404,8 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	}
 	defer projectDB.Close()
 
-	// Perform search using strategy
-	results, err := strategy.Search(query, projectDB, topK, contentType)
+	// Perform search using strategy (no content type filtering in multimodal mode)
+	results, err := strategy.Search(query, projectDB, topK, "")
 	if err != nil {
 		return nil, err
 	}

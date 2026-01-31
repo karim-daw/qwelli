@@ -57,15 +57,16 @@ func (s *HybridSearchStrategy) Name() string {
 }
 
 // Search performs hybrid search by combining semantic and keyword results
+// Note: contentType parameter ignored (multimodal mode searches all content)
 func (s *HybridSearchStrategy) Search(query string, projectDB *db.ProjectDB, topK int, contentType string) ([]db.SearchResult, error) {
-	// Get semantic results
-	semanticResults, err := s.semanticStrategy.Search(query, projectDB, topK*2, contentType)
+	// Get semantic results (contentType ignored)
+	semanticResults, err := s.semanticStrategy.Search(query, projectDB, topK*2, "")
 	if err != nil {
 		return nil, fmt.Errorf("semantic search failed: %w", err)
 	}
 
-	// Get keyword results
-	keywordResults, err := s.keywordStrategy.Search(query, projectDB, topK*2, contentType)
+	// Get keyword results (contentType ignored)
+	keywordResults, err := s.keywordStrategy.Search(query, projectDB, topK*2, "")
 	if err != nil {
 		return nil, fmt.Errorf("keyword search failed: %w", err)
 	}

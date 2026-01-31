@@ -36,10 +36,7 @@ func (s *SemanticSearchStrategy) Search(query string, projectDB *db.ProjectDB, t
 		return nil, err
 	}
 
-	// Perform ANN search
+	// Perform ANN search (no content type filtering in multimodal mode)
 	ctx := context.Background()
-	if contentType != "" {
-		return projectDB.SearchANNWithFilter(ctx, queryVec, topK, contentType)
-	}
 	return projectDB.SearchANN(ctx, queryVec, topK)
 }
