@@ -14,7 +14,6 @@ import (
 	"github.com/karim-daw/qwelli/internal/engine/embeddings"
 	"github.com/karim-daw/qwelli/internal/engine/extraction"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
-	"github.com/karim-daw/qwelli/internal/engine/search"
 	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
@@ -360,30 +359,7 @@ func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, content
 // strategy can be "semantic", "keyword", or "hybrid"
 // Note: contentType parameter is deprecated (always searches all content in multimodal mode)
 func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
-	// Ignore contentType - multimodal searches all content
-	// Get the search strategy
-	var strategy search.SearchStrategy
-
-	// Helper to create semantic strategy using the voyage client
-	createSemanticStrategy := func() *search.SemanticSearchStrategy {
-		return search.NewSemanticSearchStrategy(e.voyageClient)
-	}
-
-	switch strategyName {
-	case "semantic":
-		strategy = createSemanticStrategy()
-	case "keyword":
-		strategy = search.NewKeywordSearchStrategy()
-	case "hybrid":
-		semantic := createSemanticStrategy()
-		keyword := search.NewKeywordSearchStrategy()
-		strategy = search.NewHybridSearchStrategy(semantic, keyword)
-	default:
-		// Fall back to semantic
-		strategy = createSemanticStrategy()
-	}
-
-	// Open database - we need dimension, so try to get it from DB first
+	// Open database
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		// If dimension not found, we need to create embedder to get dimension
@@ -404,8 +380,53 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	}
 	defer projectDB.Close()
 
-	// Perform search using strategy (no content type filtering in multimodal mode)
-	results, err := strategy.Search(query, projectDB, topK, "")
+	ctx := context.Background()
+	var results []db.SearchResult
+
+	// Perform search based on strategy (inlined for simplicity)
+	switch strategyName {
+	case "keyword":
+		// Full-text search
+		results, err = projectDB.SearchFTS(ctx, query, topK, "")
+
+	case "hybrid":
+		// Hybrid: combine semantic + keyword
+		embedder, err := e.getEmbedder()
+		if err != nil {
+			return nil, err
+		}
+		queryVec, err := embedder.Embed(query)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get both semantic and keyword results
+		semanticResults, err := projectDB.SearchANN(ctx, queryVec, topK*2)
+		if err != nil {
+			return nil, fmt.Errorf("semantic search failed: %w", err)
+		}
+
+		keywordResults, err := projectDB.SearchFTS(ctx, query, topK*2, "")
+		if err != nil {
+			return nil, fmt.Errorf("keyword search failed: %w", err)
+		}
+
+		// Merge results with weighted scoring (70% semantic, 30% keyword)
+		results = e.mergeSearchResults(semanticResults, keywordResults, topK)
+
+	default: // "semantic" or fallback
+		// Vector similarity search
+		embedder, err := e.getEmbedder()
+		if err != nil {
+			return nil, err
+		}
+		queryVec, err := embedder.Embed(query)
+		if err != nil {
+			return nil, err
+		}
+		results, err = projectDB.SearchANN(ctx, queryVec, topK)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -559,4 +580,63 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 	status.UpToDate = status.Total - len(changes.ToUpdate) - len(changes.ToDelete)
 
 	return status, nil
+}
+
+// mergeSearchResults merges semantic and keyword results with weighted scoring
+// Uses 70% semantic weight and 30% keyword weight
+func (e *Engine) mergeSearchResults(semantic, keyword []db.SearchResult, topK int) []db.SearchResult {
+	const semanticWeight = 0.7
+	const keywordWeight = 0.3
+
+	// Create a map to track results by chunk ID
+	resultMap := make(map[string]*db.SearchResult)
+
+	// Process semantic results
+	for i := range semantic {
+		chunkID := semantic[i].ChunkID
+		score := (1.0 - semantic[i].Distance) * semanticWeight
+
+		if existing, ok := resultMap[chunkID]; ok {
+			existing.Distance = existing.Distance - score
+		} else {
+			result := semantic[i]
+			result.Distance = 1.0 - score
+			resultMap[chunkID] = &result
+		}
+	}
+
+	// Process keyword results
+	for i := range keyword {
+		chunkID := keyword[i].ChunkID
+		score := (1.0 - keyword[i].Distance) * keywordWeight
+
+		if existing, ok := resultMap[chunkID]; ok {
+			existing.Distance = existing.Distance - score
+		} else {
+			result := keyword[i]
+			result.Distance = 1.0 - score
+			resultMap[chunkID] = &result
+		}
+	}
+
+	// Convert map to slice and sort by distance
+	results := make([]db.SearchResult, 0, len(resultMap))
+	for _, result := range resultMap {
+		results = append(results, *result)
+	}
+
+	// Sort by distance (ascending - lower is better)
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Distance < results[i].Distance {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	// Return topK results
+	if len(results) > topK {
+		return results[:topK]
+	}
+	return results
 }
