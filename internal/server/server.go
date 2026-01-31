@@ -27,12 +27,6 @@ import (
 //go:embed web/dist
 var webFS embed.FS
 
-// SearchCacheEntry represents a cached search result
-type SearchCacheEntry struct {
-	Results   []SearchResultItem
-	Timestamp time.Time
-}
-
 type Server struct {
 	config          *config.Config
 	engine          *engine.Engine
@@ -136,56 +130,6 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // cleanupExpiredCache periodically removes expired cache entries
-func (s *Server) cleanupExpiredCache() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		s.cacheMutex.Lock()
-		now := time.Now()
-		for key, entry := range s.searchCache {
-			if now.Sub(entry.Timestamp) > s.cacheTTL {
-				delete(s.searchCache, key)
-			}
-		}
-		s.cacheMutex.Unlock()
-	}
-}
-
-// generateCacheKey creates a unique key for cache lookup
-func (s *Server) generateCacheKey(query, indexPath, strategy, contentType string, topK int) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%d", query, indexPath, strategy, contentType, topK)
-}
-
-// getCachedResults retrieves cached search results if available and not expired
-func (s *Server) getCachedResults(cacheKey string) ([]SearchResultItem, bool) {
-	s.cacheMutex.RLock()
-	defer s.cacheMutex.RUnlock()
-
-	entry, exists := s.searchCache[cacheKey]
-	if !exists {
-		return nil, false
-	}
-
-	// Check if expired
-	if time.Since(entry.Timestamp) > s.cacheTTL {
-		return nil, false
-	}
-
-	return entry.Results, true
-}
-
-// setCachedResults stores search results in cache
-func (s *Server) setCachedResults(cacheKey string, results []SearchResultItem) {
-	s.cacheMutex.Lock()
-	defer s.cacheMutex.Unlock()
-
-	s.searchCache[cacheKey] = &SearchCacheEntry{
-		Results:   results,
-		Timestamp: time.Now(),
-	}
-}
-
 type IndexInfo struct {
 	Name          string `json:"name"`
 	Path          string `json:"path"`
