@@ -67,8 +67,11 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 
 	// Create voyage client (always multimodal now)
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:         cfg.VoyageAPIKey,
-		EmbeddingModel: cfg.VoyageModel,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)

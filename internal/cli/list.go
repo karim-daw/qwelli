@@ -26,8 +26,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:         cfg.VoyageAPIKey,
-		EmbeddingModel: cfg.VoyageModel,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
@@ -94,8 +97,11 @@ func runStatus(indexPath string) error {
 	dbPath := cfg.DatabaseURL
 
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:         cfg.VoyageAPIKey,
-		EmbeddingModel: cfg.VoyageModel,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
@@ -118,7 +124,8 @@ func runStatus(indexPath string) error {
 	fmt.Printf("📄 Indexed chunks: %d\n", count)
 	fmt.Printf("📁 Total files: %d\n", status.Total)
 	fmt.Printf("✅ Up to date: %d\n", status.UpToDate)
-	fmt.Printf("🗄️  Database: PostgreSQL with pgvector\n\n")
+	fmt.Printf("🗄️  Database: PostgreSQL with pgvector\n")
+	fmt.Printf("🔄 Reranker: %s\n\n", map[bool]string{true: "enabled", false: "disabled"}[cfg.EnableReranker])
 
 	// Show pending changes (git-style)
 	if len(status.ToAdd) > 0 {

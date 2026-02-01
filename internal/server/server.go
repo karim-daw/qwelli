@@ -21,6 +21,7 @@ import (
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
+	"github.com/karim-daw/qwelli/internal/search"
 	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
@@ -45,8 +46,11 @@ type Server struct {
 func NewServer(cfg *config.Config, port int) *Server {
 	// Create a single shared Voyage client for both embeddings and reranking
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:         cfg.VoyageAPIKey,
-		EmbeddingModel: cfg.VoyageModel,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize Voyage client: %v", err)
@@ -264,31 +268,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply reranking if enabled
-	if s.enableReranker && len(engineResults) > 0 {
-		// Extract documents for reranking
-		documents := make([]string, len(engineResults))
-		for i, r := range engineResults {
-			documents[i] = r.Content
-		}
-
-		reranked, err := s.voyageClient.Rerank(r.Context(), query, documents)
-		if err != nil {
-			// Log error but continue with original results
-			log.Printf("⚠️  Reranking failed: %v (using original results)", err)
-		} else {
-			// Reorder engineResults based on reranked indices
-			reorderedResults := make([]engine.SearchResult, 0, len(reranked))
-			for _, item := range reranked {
-				if item.Index >= 0 && item.Index < len(engineResults) {
-					result := engineResults[item.Index]
-					// Update distance with negative relevance score (lower is better)
-					result.Distance = -item.RelevanceScore
-					reorderedResults = append(reorderedResults, result)
-				}
-			}
-			engineResults = reorderedResults
-		}
-	}
+	engineResults, _ = search.ApplyReranking(
+		r.Context(),
+		s.voyageClient,
+		query,
+		engineResults,
+		search.RerankOptions{
+			Enabled: s.enableReranker,
+			Verbose: false, // Server logs are already verbose enough
+		},
+	)
 
 	// Convert engine.SearchResult to API response format
 	results := make([]SearchResultItem, len(engineResults))
@@ -1124,10 +1113,8 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 		"status":    "ready",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"config": map[string]interface{}{
-			"database_type":      "postgresql",
-			"embedding_model":    s.config.VoyageModel,
-			"multimodal_enabled": true,
-			"reranker_enabled":   s.enableReranker,
+			"embedding_model":  s.config.VoyageModel,
+			"reranker_enabled": s.enableReranker,
 		},
 	})
 }

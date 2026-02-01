@@ -82,7 +82,7 @@ func TestParseSearchArgs_FlagParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, topN, textOnly, imagesOnly, strategy := parseSearchArgs(tt.args)
+			query, topN, textOnly, imagesOnly, strategy, rerankOverride, verbose := parseSearchArgs(tt.args)
 			if query != tt.wantQuery {
 				t.Errorf("parseSearchArgs() query = %q, want %q", query, tt.wantQuery)
 			}
@@ -99,6 +99,9 @@ func TestParseSearchArgs_FlagParsing(t *testing.T) {
 			if strategy != "semantic" {
 				t.Errorf("parseSearchArgs() strategy = %q, want %q", strategy, "semantic")
 			}
+			// New parameters should have sensible defaults
+			_ = rerankOverride // Should be nil unless --rerank/--no-rerank specified
+			_ = verbose        // Should be false unless --verbose specified
 		})
 	}
 }

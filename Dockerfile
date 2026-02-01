@@ -1,5 +1,5 @@
 # Multi-stage build for optimal image size
-FROM golang:1.23-alpine AS builder
+FROM golang:alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev
@@ -31,7 +31,7 @@ WORKDIR /app
 COPY --from=builder /build/qwelli .
 
 # Copy web UI assets if they exist
-COPY --from=builder /build/internal/server/web/dist ./web/dist 2>/dev/null || true
+COPY --from=builder /build/web/dist ./web/dist
 
 # Create non-root user
 RUN addgroup -g 1000 qwelli && \
@@ -48,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 # Default command - start server
-CMD ["./qwelli", "serve", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["./qwelli", "serve", "--port", "8080"]

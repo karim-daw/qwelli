@@ -16,6 +16,7 @@ import (
 
 var currentIndex string
 var cachedIndexList []string
+var rerankEnabled = true // Session state for reranking (default: true)
 
 func NewShellCmd() *cobra.Command {
 	return &cobra.Command{
@@ -118,7 +119,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		case "search":
 			if len(cmdArgs) == 0 {
-				fmt.Println("❌ Usage: search <query> [--top N] [--images-only] [--text-only] [--strategy semantic|keyword|hybrid]")
+				fmt.Println("❌ Usage: search <query> [--top N] [--strategy S] [--rerank] [--no-rerank] [--verbose]")
 				continue
 			}
 
@@ -135,8 +136,15 @@ func runShell(cmd *cobra.Command, args []string) error {
 			}
 
 			// Parse query and flags
-			query, topN, textOnly, imagesOnly, strategy := parseSearchArgs(cmdArgs)
-			if err := runSearchShell(query, indexPath, topN, textOnly, imagesOnly, strategy); err != nil {
+			query, topN, textOnly, imagesOnly, strategy, rerankFlag, verbose := parseSearchArgs(cmdArgs)
+
+			// Determine final rerank setting (flag > session state)
+			finalRerank := rerankEnabled
+			if rerankFlag != nil {
+				finalRerank = *rerankFlag
+			}
+
+			if err := runSearchShell(query, indexPath, topN, textOnly, imagesOnly, strategy, finalRerank, verbose); err != nil {
 				fmt.Printf("❌ Error: %v\n", err)
 			}
 
@@ -191,6 +199,26 @@ func runShell(cmd *cobra.Command, args []string) error {
 			} else {
 				fmt.Printf("⚠️  Model configuration is now via environment variable VOYAGE_MODEL\n")
 				fmt.Printf("   Set VOYAGE_MODEL=%s in your .env file\n", cmdArgs[0])
+			}
+
+		case "rerank":
+			if len(cmdArgs) == 0 {
+				// Show current state
+				fmt.Printf("🔄 Reranker: %s\n", map[bool]string{true: "enabled", false: "disabled"}[rerankEnabled])
+				fmt.Println("\nUsage: rerank on|off")
+				fmt.Println("Changes reranking for all searches in this shell session")
+				continue
+			}
+
+			switch strings.ToLower(cmdArgs[0]) {
+			case "on", "enable", "true":
+				rerankEnabled = true
+				fmt.Println("✅ Reranker enabled for this shell session")
+			case "off", "disable", "false":
+				rerankEnabled = false
+				fmt.Println("⚠️  Reranker disabled for this shell session")
+			default:
+				fmt.Printf("❌ Invalid option: '%s'. Use 'on' or 'off'\n", cmdArgs[0])
 			}
 
 		case "delete", "remove", "rm":
@@ -260,26 +288,31 @@ func printShellHelp() {
   use <folder|#>        - Set current index folder (use number from list)
   search <query> [opts] - Search current index
     --top N, -t N       - Number of results (default: 5)
+    --strategy S        - Search strategy (semantic, keyword, hybrid)
     --images-only       - Search only image chunks
     --text-only         - Search only text chunks
+    --rerank            - Force enable reranking for this search
+    --no-rerank         - Disable reranking for this search
+    --verbose, -v       - Show detailed reranking logs
   list                  - List all indexed folders (with numbers)
   status [folder]       - Show index status
   delete <folder|#>     - Delete an index (asks for confirmation)
   model [name]          - Show or change embedding model
+  rerank on|off         - Enable/disable reranking for this session
 
   clear                 - Clear screen
   help                  - Show this help
   exit                  - Exit shell
 
 Examples:
-  list                  - Show all indexes with numbers
-  use 1                 - Use the first index from the list
-  use ./my-folder       - Use a specific folder path
-  delete 1              - Delete the first index from the list
-  delete ./my-folder    - Delete index for specific folder
-  search hello          - Search for "hello" (top 5 results)
-  search hello --top 3  - Search for "hello" (top 3 results)
-  search hello --images-only - Search only images`)
+  rerank off                       - Disable reranking
+  search hello                     - Search without reranking
+  rerank on                        - Enable reranking
+  search query --verbose           - Search with verbose logs
+  search query --rerank --top 10   - Force reranking, 10 results
+  list                             - Show all indexes with numbers
+  use 1                            - Use the first index from the list
+  delete 1                         - Delete the first index`)
 }
 
 // runListShell lists all indexed folders and caches them for numeric selection
@@ -307,7 +340,9 @@ func runListShell(_ *cobra.Command, _ []string) error {
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            cfg.VoyageAPIKey,
 		EmbeddingModel:    cfg.VoyageModel,
-		EmbeddingEndpoint: cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
@@ -366,7 +401,7 @@ func useIndexByNumber(num int) error {
 }
 
 // parseSearchArgs parses search command arguments to extract query, --top flag, content type filters, and strategy
-func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imagesOnly bool, strategy string) {
+func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imagesOnly bool, strategy string, rerankOverride *bool, verbose bool) {
 	topN = 5              // default
 	strategy = "semantic" // default
 	queryParts := []string{}
@@ -392,11 +427,19 @@ func parseSearchArgs(args []string) (query string, topN int, textOnly bool, imag
 				i++ // skip the strategy name
 				continue
 			}
+		} else if args[i] == "--rerank" {
+			t := true
+			rerankOverride = &t
+		} else if args[i] == "--no-rerank" {
+			f := false
+			rerankOverride = &f
+		} else if args[i] == "--verbose" || args[i] == "-v" {
+			verbose = true
 		} else {
 			queryParts = append(queryParts, args[i])
 		}
 	}
 
 	query = strings.Join(queryParts, " ")
-	return query, topN, textOnly, imagesOnly, strategy
+	return query, topN, textOnly, imagesOnly, strategy, rerankOverride, verbose
 }

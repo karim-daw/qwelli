@@ -4,30 +4,11 @@ Local semantic file search using vector embeddings. Index your folders and find 
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.21+ (for building from source)
+- PostgreSQL with pgvector extension
 - Voyage AI API key
-- **Windows only:** GCC compiler (for CGO/DuckDB)
 
-## Windows Setup (GCC for CGO)
-
-DuckDB requires CGO which needs a C compiler. Install MSYS2:
-
-1. Download from https://www.msys2.org/
-2. Run installer, use default path `C:\msys64`
-3. Open MSYS2 terminal, run:
-   ```bash
-   pacman -S mingw-w64-ucrt-x86_64-gcc
-   ```
-4. Add to PATH permanently:
-   - Press `Win+R`, type `sysdm.cpl`, press Enter
-   - Advanced → Environment Variables
-   - Under "User variables", edit `Path`
-   - Add: `C:\msys64\ucrt64\bin`
-   - Click OK, restart terminal
-5. Verify:
-   ```powershell
-   gcc --version
-   ```
+**OR** use Docker Compose (recommended - no manual setup required)
 
 ## Quick Start
 
@@ -39,13 +20,22 @@ DuckDB requires CGO which needs a C compiler. Install MSYS2:
 
 ### 2. Configure `.env`
 
-Create a `.env` file in the project root:
+**Qwelli automatically loads `.env` files!** No need to manually export variables.
 
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Edit .env and add your Voyage API key
+nano .env  # Change VOYAGE_API_KEY=your_voyage_api_key_here
 ```
-QWELLI_EMBEDDING_KEY=your-voyage-api-key
-QWELLI_EMBEDDING_MODEL=voyage-multimodal-3
-QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
-```
+
+The `.env` file contains:
+- `DATABASE_URL` - Automatically set for local docker-compose
+- `VOYAGE_API_KEY` - Your API key (required)
+- `VOYAGE_MODEL` - Model to use (default: voyage-multimodal-3)
+- `PORT` - Server port (default: 8080)
+- `ENABLE_RERANKER` - Enable reranking (default: true)
 
 ### 3. Build and Run
 
@@ -55,14 +45,14 @@ QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
 # Build the binary
 go build -o qwelli ./cmd/qwelli
 
-# Or use individual commands
-./qwelli init
+# Use commands (no need to export env vars!)
 ./qwelli index ./my-folder
 ./qwelli search "query" --index ./my-folder
-
-# Run interactive shell
+./qwelli list
 ./qwelli shell
 ```
+
+**Note:** The CLI automatically loads `.env` from the current directory or parent directories. No manual `export` needed!
 
 #### Web UI Mode
 
@@ -78,6 +68,211 @@ build-with-ui.bat   # Windows
 ```
 
 **Important:** The `shell` command requires an interactive terminal. Always use the built binary (`./qwelli`) instead of `go run` for reliable operation, especially for the interactive shell.
+
+## Deployment
+
+### Local Development with Docker Compose (Recommended)
+
+The easiest way to get started:
+
+```bash
+# 1. Clone the repository
+git clone <your-repo>
+cd qwelli
+
+# 2. Create .env file
+cp .env.example .env
+
+# 3. Edit .env and add your Voyage API key
+nano .env  # or vim, code, etc.
+
+# 4. Start everything (PostgreSQL + Qwelli)
+docker-compose up
+
+# Access at http://localhost:8080
+```
+
+The docker-compose setup includes:
+- PostgreSQL 16 with pgvector extension
+- Automatic database initialization
+- Health checks and auto-restart
+- All configuration via `.env` file
+
+### Production Deployment
+
+#### Option 1: Docker Compose with Managed PostgreSQL
+
+Best for simple production deployments on any cloud or VPS.
+
+**Step 1: Set up managed PostgreSQL**
+
+*Azure Example:*
+```bash
+# Create PostgreSQL Flexible Server
+az postgres flexible-server create \
+  --name qwelli-db \
+  --resource-group mygroup \
+  --location eastus \
+  --admin-user qwelli \
+  --admin-password <secure-password> \
+  --sku-name Standard_B2s \
+  --tier Burstable \
+  --storage-size 32
+
+# Enable pgvector extension
+az postgres flexible-server parameter set \
+  --resource-group mygroup \
+  --server-name qwelli-db \
+  --name azure.extensions \
+  --value VECTOR
+
+# Allow your server's IP
+az postgres flexible-server firewall-rule create \
+  --resource-group mygroup \
+  --name qwelli-db \
+  --rule-name allow-my-server \
+  --start-ip-address <your-server-ip> \
+  --end-ip-address <your-server-ip>
+```
+
+*AWS RDS Example:*
+```bash
+# Create RDS PostgreSQL instance with pgvector
+aws rds create-db-instance \
+  --db-instance-identifier qwelli-db \
+  --db-instance-class db.t3.micro \
+  --engine postgres \
+  --engine-version 16.1 \
+  --master-username qwelli \
+  --master-user-password <secure-password> \
+  --allocated-storage 20 \
+  --vpc-security-group-ids <your-sg-id>
+
+# Note: pgvector must be enabled via parameter group
+```
+
+**Step 2: Deploy application**
+
+On your VPS/VM:
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+
+# Clone repository
+git clone <your-repo>
+cd qwelli
+
+# Create production .env
+cat > .env << 'EOF'
+DATABASE_URL=postgresql://qwelli:password@qwelli-db.postgres.database.azure.com:5432/qwelli?sslmode=require
+VOYAGE_API_KEY=your_voyage_api_key
+VOYAGE_MODEL=voyage-multimodal-3
+PORT=8080
+ENABLE_RERANKER=true
+EOF
+
+# Start with production configuration
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d qwelli
+
+# View logs
+docker-compose logs -f qwelli
+```
+
+The production setup:
+- Uses external managed PostgreSQL (no local postgres container)
+- Runs with production resource limits
+- Automatic health checks and restarts
+- Can use pre-built Docker images
+
+**Step 3: Update/Redeploy**
+
+```bash
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker-compose build qwelli
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d qwelli
+
+# Or use pre-built image
+docker pull <your-registry>/qwelli:latest
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d qwelli
+```
+
+#### Option 2: Manual Build and Deployment
+
+For maximum control or when Docker isn't available:
+
+```bash
+# 1. Build binary
+go build -o qwelli ./cmd/qwelli
+
+# 2. Set environment variables
+export DATABASE_URL="postgresql://user:pass@host:5432/qwelli?sslmode=require"
+export VOYAGE_API_KEY="your_key"
+export PORT=8080
+
+# 3. Run
+./qwelli serve
+
+# Or as systemd service (recommended for production)
+sudo systemctl enable qwelli
+sudo systemctl start qwelli
+```
+
+Example systemd service file (`/etc/systemd/system/qwelli.service`):
+```ini
+[Unit]
+Description=Qwelli Semantic Search Service
+After=network.target
+
+[Service]
+Type=simple
+User=qwelli
+WorkingDirectory=/opt/qwelli
+EnvironmentFile=/opt/qwelli/.env
+ExecStart=/opt/qwelli/qwelli serve
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Cloud-Specific Guides
+
+#### Azure
+- **Database:** Azure Database for PostgreSQL Flexible Server
+- **Compute:** Azure Container Instances or VM
+- **Cost:** ~$50-100/month (dev), ~$200-400/month (prod)
+
+#### AWS
+- **Database:** RDS for PostgreSQL with pgvector
+- **Compute:** ECS Fargate, EC2, or App Runner
+- **Cost:** ~$40-80/month (dev), ~$150-300/month (prod)
+
+#### DigitalOcean / Linode / Other VPS
+- **Database:** Managed PostgreSQL or self-hosted
+- **Compute:** Standard Droplet/VM
+- **Cost:** ~$10-50/month (all-in-one)
+
+### Scaling Considerations
+
+**Single Server (0-10k requests/day)**
+- Docker Compose on single VPS works great
+- Managed PostgreSQL (Standard_B2s or db.t3.small)
+- 2 CPU / 4GB RAM VM
+
+**Medium Scale (10k-100k requests/day)**
+- Multiple app instances behind load balancer
+- Managed PostgreSQL (Standard_D2s or db.t3.medium)
+- Docker Swarm or simple orchestration
+
+**Large Scale (100k+ requests/day)**
+- Consider Kubernetes for orchestration
+- PostgreSQL with read replicas
+- CDN for static assets
+- Caching layer (Redis)
 
 ## Usage
 
@@ -258,46 +453,61 @@ Currently supported: **Voyage AI**
 | `voyage-multimodal-3` | 1024      | Multimodal (text + images) |
 | `voyage-3`            | 1024      | Text-only                  |
 
-### Custom Endpoints
+### Configuration
 
-Default endpoint:
+All configuration is via environment variables (see `.env.example`):
 
-```
-QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
+```bash
+DATABASE_URL=postgresql://...          # Required: PostgreSQL connection
+VOYAGE_API_KEY=your_key                # Required: Voyage AI API key
+VOYAGE_MODEL=voyage-multimodal-3       # Optional: Model to use
+PORT=8080                              # Optional: Server port
+ENABLE_RERANKER=true                   # Optional: Enable result reranking
 ```
 
 ## Project Structure
 
 ```
 qwelli/
-├── cmd/qwelli/          # CLI entry point
+├── cmd/qwelli/                 # CLI entry point
 ├── internal/
-│   ├── cli/             # Commands (init, index, search, shell)
-│   ├── config/          # Config file handling
-│   ├── db/              # DuckDB + HNSW index
-│   └── engine/          # Index & search orchestration
-│       ├── chunker/     # Content chunking strategies
-│       ├── indexer/     # Embedding providers
-│       └── processor/   # File processing (PDF, images, etc.)
-├── tests/demo/          # Demo application
-└── dist/                # Built binaries
+│   ├── cli/                    # Commands (init, index, search, shell)
+│   ├── config/                 # Environment-based configuration
+│   ├── db/                     # PostgreSQL with pgvector
+│   ├── engine/                 # Index & search orchestration
+│   │   ├── chunker/            # Content chunking strategies
+│   │   ├── embeddings/         # Embedding providers (Voyage AI)
+│   │   ├── extraction/         # PDF, image processing
+│   │   └── fileprocessor/      # File type detection
+│   ├── server/                 # Web server & API
+│   └── voyage/                 # Voyage AI client
+├── web/                        # React frontend
+├── docker-compose.yml          # Local development setup
+├── docker-compose.prod.yml     # Production overrides
+├── Dockerfile                  # Container image
+└── .env.example                # Environment variables template
 ```
 
 ## Data Storage
 
-All data is local:
+All data is stored in PostgreSQL with pgvector extension:
 
-- **Config:** `~/.qwelli/config.yaml`
-- **Indexes:** `~/.qwelli/indexes/*.db`
+- **Files & Chunks:** Indexed content and metadata
+- **Embeddings:** 1024-dimensional vectors (voyage-multimodal-3)
+- **Vector Index:** pgvector HNSW index for fast similarity search
 
-Each indexed folder gets its own DuckDB database with HNSW vector index.
+Configuration is environment-based (no config files).
 
 ## How It Works
 
-1. **Index:** Scan folder → Generate embeddings via Voyage AI → Store in DuckDB
-2. **Search:** Embed query → HNSW approximate nearest neighbor search → Return matches
+1. **Index:** Scan folder → Chunk files → Generate embeddings via Voyage AI → Store in PostgreSQL
+2. **Search:** Embed query → pgvector HNSW search → Optional reranking → Return matches
 
-One embedding model per database. Change model = re-index.
+Features:
+- **Multimodal:** Handles both text and images with `voyage-multimodal-3`
+- **Fast:** pgvector HNSW index for approximate nearest neighbor search
+- **Accurate:** Optional reranking for improved results
+- **Scalable:** PostgreSQL can handle millions of documents
 
 ## Cost
 

@@ -8,8 +8,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-qwelli}
       POSTGRES_USER: ${POSTGRES_USER:-qwelli}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password must be set}
-      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qwelli}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -24,15 +23,6 @@ services:
     restart: unless-stopped
     networks:
       - qwelli-network
-    # Resource limits for production
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
   # Qwelli application
   qwelli:
@@ -41,53 +31,34 @@ services:
       dockerfile: Dockerfile
     container_name: qwelli-app
     environment:
-      # Database configuration
-      DB_TYPE: postgres
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-qwelli}
-      DB_USER: ${POSTGRES_USER:-qwelli}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Database password must be set}
-      DB_SSLMODE: ${DB_SSLMODE:-disable}
-      DB_MAX_CONNS: ${DB_MAX_CONNS:-25}
-      DB_MAX_IDLE: ${DB_MAX_IDLE:-5}
-
-      # Voyage API configuration
-      QWELLI_EMBEDDING_KEY: ${VOYAGE_API_KEY:?Voyage API key must be set}
-      QWELLI_EMBEDDING_MODEL: ${EMBEDDING_MODEL:-voyage-multimodal-3}
-      QWELLI_EMBEDDING_ENDPOINT: ${EMBEDDING_ENDPOINT:-https://api.voyageai.com/v1/multimodalembeddings}
-
+      # Database connection - constructed from postgres service
+      DATABASE_URL: postgresql://${POSTGRES_USER:-qwelli}:${POSTGRES_PASSWORD:-qwelli}@postgres:5432/${POSTGRES_DB:-qwelli}?sslmode=disable
+      
+      # Voyage AI API configuration
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:?Voyage API key is required}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-multimodal-3}
+      
       # Application settings
-      ENABLE_MULTIMODAL: ${ENABLE_MULTIMODAL:-true}
+      PORT: ${PORT:-8080}
       ENABLE_RERANKER: ${ENABLE_RERANKER:-true}
-      IMAGE_QUALITY: ${IMAGE_QUALITY:-medium}
-
-      # Server settings
-      SERVER_HOST: 0.0.0.0
-      SERVER_PORT: 8080
+    
     ports:
       - "${APP_PORT:-8080}:8080"
+    
     depends_on:
       postgres:
         condition: service_healthy
+    
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 40s
+    
     restart: unless-stopped
     networks:
       - qwelli-network
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
 volumes:
   postgres_data:
