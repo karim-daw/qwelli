@@ -1,0 +1,54 @@
+version: '3.8'
+
+# Production override for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  # Override qwelli service for production
+  qwelli:
+    # Use pre-built image instead of building
+    image: ${DOCKER_IMAGE:-qwelli:latest}
+    build: null  # Don't build in production
+    
+    # Production environment uses managed PostgreSQL
+    environment:
+      # Required: External managed database
+      DATABASE_URL: ${DATABASE_URL:?External DATABASE_URL is required for production}
+      
+      # Voyage AI API configuration
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:?Voyage API key is required}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-multimodal-3}
+      
+      # Application settings
+      PORT: ${PORT:-8080}
+      ENABLE_RERANKER: ${ENABLE_RERANKER:-true}
+    
+    # Remove postgres dependency (using external database)
+    depends_on: []
+    
+    # Production restart policy
+    restart: always
+    
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      
+      # Production health checks (more aggressive)
+      replicas: 1
+    
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+# Don't start postgres in production (using managed database)
+# To completely exclude postgres service, run:
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d qwelli

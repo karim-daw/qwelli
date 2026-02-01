@@ -1,6 +1,7 @@
 package differ
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -41,9 +42,10 @@ type FileStatus struct {
 // DetectChanges compares filesystem state with database state to identify changes
 func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, error) {
 	startTime := time.Now()
+	ctx := context.Background()
 
 	// Get all files from database
-	dbFiles, err := projectDB.GetAllFiles()
+	dbFiles, err := projectDB.GetAllFiles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get files from database: %w", err)
 	}

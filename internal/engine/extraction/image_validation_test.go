@@ -1,4 +1,5 @@
 package extraction
+import "context"
 
 import (
 	"bytes"
@@ -88,7 +89,7 @@ func TestEngine_ImageValidation_SizeFiltering(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -145,7 +146,7 @@ func TestEngine_ImageValidation_SizeFiltering(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		if err := pdb.InsertChunk(chunk); err != nil {
+		if _, err := pdb.InsertChunk(context.Background(), chunk); err != nil {
 			t.Fatalf("InsertChunk() error = %v", err)
 		}
 	}
@@ -156,7 +157,7 @@ func TestEngine_ImageValidation_SizeFiltering(t *testing.T) {
 
 	// Verify chunks are stored
 	for _, chunk := range chunks {
-		retrieved, err := pdb.GetChunk(chunk.ChunkID)
+		retrieved, err := pdb.GetChunk(context.Background(), chunk.ChunkID)
 		if err != nil {
 			t.Fatalf("GetChunk() %s error = %v", chunk.ChunkID, err)
 		}
@@ -190,7 +191,7 @@ func TestEngine_ImageValidation_InvalidBase64(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -220,12 +221,12 @@ func TestEngine_ImageValidation_InvalidBase64(t *testing.T) {
 			PageNumbers: []int{1},
 		}
 
-		if err := pdb.InsertChunk(chunk); err != nil {
+		if _, err := pdb.InsertChunk(context.Background(), chunk); err != nil {
 			t.Fatalf("InsertChunk() %s error = %v", tc.name, err)
 		}
 
 		// Verify chunk is stored (validation happens during embedding, not storage)
-		retrieved, err := pdb.GetChunk(chunk.ChunkID)
+		retrieved, err := pdb.GetChunk(context.Background(), chunk.ChunkID)
 		if err != nil {
 			t.Fatalf("GetChunk() %s error = %v", tc.name, err)
 		}

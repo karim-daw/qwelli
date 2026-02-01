@@ -1,12 +1,22 @@
 package db
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
+// skipIfNoPostgres skips the test if DATABASE_URL is not set
+func skipIfNoPostgres(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" {
+		t.Skip("Skipping PostgreSQL test: DATABASE_URL not set")
+	}
+}
+
 func TestOpenProjectDB(t *testing.T) {
+	skipIfNoPostgres(t)
 	t.Run("successful_open", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "test.db")
@@ -17,8 +27,9 @@ func TestOpenProjectDB(t *testing.T) {
 		}
 		defer pdb.Close()
 
-		if pdb.Path != dbPath {
-			t.Errorf("pdb.Path = %v, want %v", pdb.Path, dbPath)
+		// DB struct no longer has Path field (using connection string now)
+		if pdb == nil {
+			t.Error("expected valid DB instance")
 		}
 	})
 
@@ -50,11 +61,11 @@ func TestInsertAndGetFile(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
-	retrieved, err := pdb.GetFile(testFile.FileID)
+	retrieved, err := pdb.GetFile(context.Background(), testFile.FileID)
 	if err != nil {
 		t.Fatalf("GetFile() error = %v", err)
 	}
@@ -88,7 +99,7 @@ func TestInsertFileChunkAndEmbedding(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -104,22 +115,18 @@ func TestInsertFileChunkAndEmbedding(t *testing.T) {
 		PageNumbers: []int{},
 	}
 
-	if err := pdb.InsertChunk(testChunk); err != nil {
+	chunkID, err := pdb.InsertChunk(context.Background(), testChunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() error = %v", err)
 	}
 
 	// Insert embedding
-	testEmb := Embedding{
-		ChunkID: testChunk.ChunkID,
-		Vector:  []float32{0.1, 0.2, 0.3, 0.4},
-	}
-
-	if err := pdb.InsertEmbedding(testEmb); err != nil {
+	if err := pdb.InsertEmbedding(context.Background(), chunkID, []float32{0.1, 0.2, 0.3, 0.4}); err != nil {
 		t.Fatalf("InsertEmbedding() error = %v", err)
 	}
 
 	// Verify chunk retrieval
-	retrieved, err := pdb.GetChunk(testChunk.ChunkID)
+	retrieved, err := pdb.GetChunk(context.Background(), testChunk.ChunkID)
 	if err != nil {
 		t.Fatalf("GetChunk() error = %v", err)
 	}
@@ -160,21 +167,21 @@ func TestBuildHNSWIndex(t *testing.T) {
 	}
 
 	for _, file := range files {
-		pdb.InsertFile(file)
+		pdb.InsertFile(context.Background(), file)
 	}
 	for _, chunk := range chunks {
-		pdb.InsertChunk(chunk)
+		pdb.InsertChunk(context.Background(), chunk)
 	}
 	for _, emb := range embeddings {
-		pdb.InsertEmbedding(emb)
+		pdb.InsertEmbedding(context.Background(), emb.ChunkID, emb.Vector)
 	}
 
-	if err := pdb.BuildHNSWIndex(); err != nil {
+	if err := pdb.BuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("BuildHNSWIndex() error = %v", err)
 	}
 
 	// Should be idempotent
-	if err := pdb.BuildHNSWIndex(); err != nil {
+	if err := pdb.BuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("BuildHNSWIndex() second call error = %v", err)
 	}
 }
@@ -210,18 +217,18 @@ func TestSearchANN(t *testing.T) {
 	}
 
 	for _, file := range files {
-		pdb.InsertFile(file)
+		pdb.InsertFile(context.Background(), file)
 	}
 	for _, chunk := range chunks {
-		pdb.InsertChunk(chunk)
+		pdb.InsertChunk(context.Background(), chunk)
 	}
 	for _, emb := range embeddings {
-		pdb.InsertEmbedding(emb)
+		pdb.InsertEmbedding(context.Background(), emb.ChunkID, emb.Vector)
 	}
-	pdb.BuildHNSWIndex()
+	pdb.BuildHNSWIndex(context.Background())
 
 	t.Run("finds_closest", func(t *testing.T) {
-		results, err := pdb.SearchANN([]float32{0.9, 0.1, 0.0, 0.0}, 3)
+		results, err := pdb.SearchANN(context.Background(), []float32{0.9, 0.1, 0.0, 0.0}, 3)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -236,7 +243,7 @@ func TestSearchANN(t *testing.T) {
 	})
 
 	t.Run("limit_k", func(t *testing.T) {
-		results, err := pdb.SearchANN([]float32{0.5, 0.5, 0.5, 0.0}, 1)
+		results, err := pdb.SearchANN(context.Background(), []float32{0.5, 0.5, 0.5, 0.0}, 1)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -247,7 +254,7 @@ func TestSearchANN(t *testing.T) {
 	})
 
 	t.Run("exact_match_distance_zero", func(t *testing.T) {
-		results, err := pdb.SearchANN([]float32{0.0, 1.0, 0.0, 0.0}, 1)
+		results, err := pdb.SearchANN(context.Background(), []float32{0.0, 1.0, 0.0, 0.0}, 1)
 		if err != nil {
 			t.Fatalf("SearchANN() error = %v", err)
 		}
@@ -272,9 +279,9 @@ func TestSearchANN_EmptyDatabase(t *testing.T) {
 	}
 	defer pdb.Close()
 
-	pdb.BuildHNSWIndex()
+	pdb.BuildHNSWIndex(context.Background())
 
-	results, err := pdb.SearchANN([]float32{1.0, 0.0, 0.0, 0.0}, 3)
+	results, err := pdb.SearchANN(context.Background(), []float32{1.0, 0.0, 0.0, 0.0}, 3)
 	if err != nil {
 		t.Fatalf("SearchANN() error = %v", err)
 	}
@@ -304,7 +311,7 @@ func TestDeleteFile_Cascade(t *testing.T) {
 		Size:       100,
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -318,37 +325,35 @@ func TestDeleteFile_Cascade(t *testing.T) {
 		Content:     "Test content",
 		PageNumbers: []int{},
 	}
-	if err := pdb.InsertChunk(chunk); err != nil {
+	chunkID, err := pdb.InsertChunk(context.Background(), chunk)
+	if err != nil {
 		t.Fatalf("InsertChunk() error = %v", err)
 	}
 
-	embedding := Embedding{
-		ChunkID: "chunk-001",
-		Vector:  []float32{0.1, 0.2, 0.3, 0.4},
-	}
-	if err := pdb.InsertEmbedding(embedding); err != nil {
+	// Insert embedding
+	if err := pdb.InsertEmbedding(context.Background(), chunkID, []float32{0.1, 0.2, 0.3, 0.4}); err != nil {
 		t.Fatalf("InsertEmbedding() error = %v", err)
 	}
 
 	// Delete file (should cascade)
-	err = pdb.DeleteFile("file-001")
+	err = pdb.DeleteFile(context.Background(), "file-001")
 	if err != nil {
 		t.Fatalf("DeleteFile() error = %v", err)
 	}
 
 	// Verify cascade deletion
-	_, err = pdb.GetFile("file-001")
+	_, err = pdb.GetFile(context.Background(), "file-001")
 	if err == nil {
 		t.Error("File should be deleted")
 	}
 
-	_, err = pdb.GetChunk("chunk-001")
+	_, err = pdb.GetChunk(context.Background(), "chunk-001")
 	if err == nil {
 		t.Error("Chunk should be deleted")
 	}
 
 	// Verify embedding deleted by trying to search
-	results, _ := pdb.SearchANN([]float32{0.1, 0.2, 0.3, 0.4}, 1)
+	results, _ := pdb.SearchANN(context.Background(), []float32{0.1, 0.2, 0.3, 0.4}, 1)
 	if len(results) > 0 {
 		t.Error("Embedding should be deleted")
 	}
@@ -370,12 +375,12 @@ func TestGetAllFiles(t *testing.T) {
 	}
 
 	for _, f := range files {
-		if err := pdb.InsertFile(f); err != nil {
+		if err := pdb.InsertFile(context.Background(), f); err != nil {
 			t.Fatalf("InsertFile() error = %v", err)
 		}
 	}
 
-	allFiles, err := pdb.GetAllFiles()
+	allFiles, err := pdb.GetAllFiles(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllFiles() error = %v", err)
 	}
@@ -405,11 +410,11 @@ func TestGetFileByPath(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
-	retrieved, err := pdb.GetFileByPath("/test/path/file.txt")
+	retrieved, err := pdb.GetFileByPath(context.Background(), "/test/path/file.txt")
 	if err != nil {
 		t.Fatalf("GetFileByPath() error = %v", err)
 	}
@@ -441,7 +446,7 @@ func TestGetChunksForFile(t *testing.T) {
 		Size:       100,
 		IndexedAt:  time.Now(),
 	}
-	if err := pdb.InsertFile(file); err != nil {
+	if err := pdb.InsertFile(context.Background(), file); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -451,12 +456,13 @@ func TestGetChunksForFile(t *testing.T) {
 	}
 
 	for _, c := range chunks {
-		if err := pdb.InsertChunk(c); err != nil {
+		_, err = pdb.InsertChunk(context.Background(), c)
+		if err != nil {
 			t.Fatalf("InsertChunk() error = %v", err)
 		}
 	}
 
-	fileChunks, err := pdb.GetChunksForFile("file-001")
+	fileChunks, err := pdb.GetChunksForFile(context.Background(), "file-001")
 	if err != nil {
 		t.Fatalf("GetChunksForFile() error = %v", err)
 	}
@@ -494,7 +500,7 @@ func TestRebuildHNSWIndex(t *testing.T) {
 		Size:       100,
 		IndexedAt:  time.Now(),
 	}
-	pdb.InsertFile(file)
+	pdb.InsertFile(context.Background(), file)
 
 	chunks := []Chunk{
 		{ChunkID: "c1", FileID: "file-1", FilePath: "/1.txt", FileType: "txt", ChunkIndex: 0, TotalChunks: 2, Content: "Content 1", PageNumbers: []int{}},
@@ -507,19 +513,19 @@ func TestRebuildHNSWIndex(t *testing.T) {
 	}
 
 	for _, c := range chunks {
-		pdb.InsertChunk(c)
+		pdb.InsertChunk(context.Background(), c)
 	}
 	for _, e := range embeddings {
-		pdb.InsertEmbedding(e)
+		pdb.InsertEmbedding(context.Background(), e.ChunkID, e.Vector)
 	}
 
 	// Build initial index
-	if err := pdb.BuildHNSWIndex(); err != nil {
+	if err := pdb.BuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("BuildHNSWIndex() error = %v", err)
 	}
 
 	// Verify search works
-	results, err := pdb.SearchANN([]float32{0.9, 0.1, 0.0, 0.0}, 2)
+	results, err := pdb.SearchANN(context.Background(), []float32{0.9, 0.1, 0.0, 0.0}, 2)
 	if err != nil {
 		t.Fatalf("SearchANN() error = %v", err)
 	}
@@ -528,12 +534,12 @@ func TestRebuildHNSWIndex(t *testing.T) {
 	}
 
 	// Rebuild index
-	if err := pdb.RebuildHNSWIndex(); err != nil {
+	if err := pdb.RebuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("RebuildHNSWIndex() error = %v", err)
 	}
 
 	// Verify search still works after rebuild
-	results, err = pdb.SearchANN([]float32{0.9, 0.1, 0.0, 0.0}, 2)
+	results, err = pdb.SearchANN(context.Background(), []float32{0.9, 0.1, 0.0, 0.0}, 2)
 	if err != nil {
 		t.Fatalf("SearchANN() after rebuild error = %v", err)
 	}
@@ -553,7 +559,7 @@ func TestRebuildHNSWIndex_EmptyTable(t *testing.T) {
 	defer pdb.Close()
 
 	// Should not error on empty table
-	if err := pdb.RebuildHNSWIndex(); err != nil {
+	if err := pdb.RebuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("RebuildHNSWIndex() on empty table error = %v", err)
 	}
 }

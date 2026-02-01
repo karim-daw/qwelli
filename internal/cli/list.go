@@ -2,9 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
@@ -27,57 +25,42 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// List all .db files in index directory
-	files, err := filepath.Glob(filepath.Join(cfg.IndexDir, "*.db"))
-	if err != nil {
-		return fmt.Errorf("failed to list indexes: %w", err)
-	}
-
-	if len(files) == 0 {
-		fmt.Println("No indexed folders found.")
-		fmt.Println("Run 'qwelli index <folder>' to create your first index.")
-		return nil
-	}
-
-	fmt.Printf("📚 Indexed folders (%d):\n\n", len(files))
-
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
 	}
 
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
+	eng := engine.NewEngine(voyageClient, true)
 
-	for i, dbFile := range files {
-		// Get stats
-		count, err := eng.GetIndexStats(dbFile)
-		if err != nil {
-			count = 0
-		}
-
-		// Get folder path from metadata
-		folderPath, err := eng.GetFolderPath(dbFile)
-		if err != nil || folderPath == "" {
-			// Fallback to database name if no metadata
-			dbName := filepath.Base(dbFile)
-			folderPath = strings.TrimSuffix(dbName, ".db")
-		}
-
-		// Get file info
-		info, _ := os.Stat(dbFile)
-
-		fmt.Printf("%d. %s\n", i+1, folderPath)
-		fmt.Printf("   📄 Documents: %d\n", count)
-		fmt.Printf("   💾 Database: %s\n", dbFile)
-		if info != nil {
-			fmt.Printf("   🕐 Last modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
-		}
-		fmt.Println()
+	// With PostgreSQL, we have a single database - show its stats
+	count, err := eng.GetIndexStats(cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to get database stats: %w", err)
 	}
+
+	if count == 0 {
+		fmt.Println("No documents indexed yet.")
+		fmt.Println("Run 'qwelli index <folder>' to start indexing.")
+		return nil
+	}
+
+	// Get folder path from metadata
+	folderPath, err := eng.GetFolderPath(cfg.DatabaseURL)
+	if err != nil || folderPath == "" {
+		folderPath = "default"
+	}
+
+	fmt.Printf("📚 Indexed database:\n\n")
+	fmt.Printf("   📁 Folder: %s\n", folderPath)
+	fmt.Printf("   📄 Documents: %d\n", count)
+	fmt.Printf("   🗄️  Database: PostgreSQL with pgvector\n")
+	fmt.Println()
 
 	return nil
 }
@@ -111,25 +94,20 @@ func runStatus(indexPath string) error {
 		return err
 	}
 
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
-
-	// Check if database exists
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		return fmt.Errorf("index not found for %s. Run 'qwelli index %s' first", absPath, absPath)
-	}
+	dbPath := cfg.DatabaseURL
 
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
 	}
 
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
+	eng := engine.NewEngine(voyageClient, true)
 
 	// Get index status with pending changes
 	status, err := eng.GetIndexStatus(dbPath, absPath)
@@ -146,9 +124,8 @@ func runStatus(indexPath string) error {
 	fmt.Printf("📄 Indexed chunks: %d\n", count)
 	fmt.Printf("📁 Total files: %d\n", status.Total)
 	fmt.Printf("✅ Up to date: %d\n", status.UpToDate)
-	fmt.Printf("💾 Database: %s\n", dbPath)
-	fmt.Printf("💽 Database size: %.2f MB\n", float64(info.Size())/(1024*1024))
-	fmt.Printf("🕐 Last indexed: %s\n\n", info.ModTime().Format("2006-01-02 15:04:05"))
+	fmt.Printf("🗄️  Database: PostgreSQL with pgvector\n")
+	fmt.Printf("🔄 Reranker: %s\n\n", map[bool]string{true: "enabled", false: "disabled"}[cfg.EnableReranker])
 
 	// Show pending changes (git-style)
 	if len(status.ToAdd) > 0 {

@@ -21,17 +21,12 @@ import (
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
+	"github.com/karim-daw/qwelli/internal/search"
 	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
 //go:embed web/dist
 var webFS embed.FS
-
-// SearchCacheEntry represents a cached search result
-type SearchCacheEntry struct {
-	Results   []SearchResultItem
-	Timestamp time.Time
-}
 
 type Server struct {
 	config          *config.Config
@@ -51,18 +46,18 @@ type Server struct {
 func NewServer(cfg *config.Config, port int) *Server {
 	// Create a single shared Voyage client for both embeddings and reranking
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
-		RerankModel:       cfg.RerankModel,
-		RerankEndpoint:    cfg.RerankEndpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize Voyage client: %v", err)
 	}
 
-	// Create engine using shared client
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
+	// Create engine using shared client (always multimodal now)
+	eng := engine.NewEngine(voyageClient, true)
 
 	s := &Server{
 		config:          cfg,
@@ -84,6 +79,10 @@ func NewServer(cfg *config.Config, port int) *Server {
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
+
+	// Health check endpoint (for Docker/K8s)
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReadiness)
 
 	// API endpoints
 	mux.HandleFunc("/api/indexes", s.handleListIndexes)
@@ -109,8 +108,8 @@ func (s *Server) Start() error {
 
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("🚀 Server starting on http://localhost%s\n", addr)
-	log.Printf("📂 Index directory: %s\n", s.config.IndexDir)
-	log.Printf("🤖 Model: %s\n", s.config.Model)
+	log.Printf("🗄️  Database: PostgreSQL with pgvector\n")
+	log.Printf("🤖 Model: %s\n", s.config.VoyageModel)
 	if s.enableReranker {
 		log.Printf("🔄 Reranker: enabled (voyage)\n")
 	}
@@ -135,56 +134,6 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // cleanupExpiredCache periodically removes expired cache entries
-func (s *Server) cleanupExpiredCache() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		s.cacheMutex.Lock()
-		now := time.Now()
-		for key, entry := range s.searchCache {
-			if now.Sub(entry.Timestamp) > s.cacheTTL {
-				delete(s.searchCache, key)
-			}
-		}
-		s.cacheMutex.Unlock()
-	}
-}
-
-// generateCacheKey creates a unique key for cache lookup
-func (s *Server) generateCacheKey(query, indexPath, strategy, contentType string, topK int) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%d", query, indexPath, strategy, contentType, topK)
-}
-
-// getCachedResults retrieves cached search results if available and not expired
-func (s *Server) getCachedResults(cacheKey string) ([]SearchResultItem, bool) {
-	s.cacheMutex.RLock()
-	defer s.cacheMutex.RUnlock()
-
-	entry, exists := s.searchCache[cacheKey]
-	if !exists {
-		return nil, false
-	}
-
-	// Check if expired
-	if time.Since(entry.Timestamp) > s.cacheTTL {
-		return nil, false
-	}
-
-	return entry.Results, true
-}
-
-// setCachedResults stores search results in cache
-func (s *Server) setCachedResults(cacheKey string, results []SearchResultItem) {
-	s.cacheMutex.Lock()
-	defer s.cacheMutex.Unlock()
-
-	s.searchCache[cacheKey] = &SearchCacheEntry{
-		Results:   results,
-		Timestamp: time.Now(),
-	}
-}
-
 type IndexInfo struct {
 	Name          string `json:"name"`
 	Path          string `json:"path"`
@@ -202,44 +151,28 @@ func (s *Server) handleListIndexes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List all .db files in index directory
-	files, err := filepath.Glob(filepath.Join(s.config.IndexDir, "*.db"))
+	// With PostgreSQL, we have a single database
+	// For now, return stats for the database (we can enhance this later to support multiple "indexes" via metadata)
+	indexes := make([]IndexInfo, 0, 1)
+
+	// Get stats from database using connection string
+	count, err := s.engine.GetIndexStats(s.config.DatabaseURL)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list indexes: %v", err), http.StatusInternalServerError)
-		return
+		count = 0
 	}
 
-	indexes := make([]IndexInfo, 0, len(files))
-
-	for _, dbFile := range files {
-		// Get stats
-		count, err := s.engine.GetIndexStats(dbFile)
-		if err != nil {
-			count = 0
-		}
-
-		// Get folder path from metadata
-		folderPath, err := s.engine.GetFolderPath(dbFile)
-		if err != nil || folderPath == "" {
-			// Fallback to database name if no metadata
-			dbName := filepath.Base(dbFile)
-			folderPath = strings.TrimSuffix(dbName, ".db")
-		}
-
-		// Get file info
-		info, _ := os.Stat(dbFile)
-		lastModified := ""
-		if info != nil {
-			lastModified = info.ModTime().Format("2006-01-02 15:04:05")
-		}
-
-		indexes = append(indexes, IndexInfo{
-			Name:          filepath.Base(folderPath),
-			Path:          folderPath,
-			DocumentCount: count,
-			LastModified:  lastModified,
-		})
+	// Get folder path from metadata
+	folderPath, err := s.engine.GetFolderPath(s.config.DatabaseURL)
+	if err != nil || folderPath == "" {
+		folderPath = "default"
 	}
+
+	indexes = append(indexes, IndexInfo{
+		Name:          filepath.Base(folderPath),
+		Path:          folderPath,
+		DocumentCount: count,
+		LastModified:  time.Now().Format("2006-01-02 15:04:05"),
+	})
 
 	response := ListIndexesResponse{Indexes: indexes}
 
@@ -303,22 +236,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get database path
-	absPath, err := filepath.Abs(indexPath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid index path: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	dbPath := filepath.Join(s.config.IndexDir, generateDBName(absPath))
-
-	// Check if index exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Index not found: %s", dbPath)})
-		return
-	}
+	// With PostgreSQL, we use the configured database URL
+	// indexPath is ignored for now (can be used later for filtering within database)
+	dbPath := s.config.DatabaseURL
 
 	// Generate cache key
 	cacheKey := s.generateCacheKey(query, indexPath, strategy, contentType, topK)
@@ -348,31 +268,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply reranking if enabled
-	if s.enableReranker && len(engineResults) > 0 {
-		// Extract documents for reranking
-		documents := make([]string, len(engineResults))
-		for i, r := range engineResults {
-			documents[i] = r.Content
-		}
-
-		reranked, err := s.voyageClient.Rerank(r.Context(), query, documents)
-		if err != nil {
-			// Log error but continue with original results
-			log.Printf("⚠️  Reranking failed: %v (using original results)", err)
-		} else {
-			// Reorder engineResults based on reranked indices
-			reorderedResults := make([]engine.SearchResult, 0, len(reranked))
-			for _, item := range reranked {
-				if item.Index >= 0 && item.Index < len(engineResults) {
-					result := engineResults[item.Index]
-					// Update distance with negative relevance score (lower is better)
-					result.Distance = -item.RelevanceScore
-					reorderedResults = append(reorderedResults, result)
-				}
-			}
-			engineResults = reorderedResults
-		}
-	}
+	engineResults, _ = search.ApplyReranking(
+		r.Context(),
+		s.voyageClient,
+		query,
+		engineResults,
+		search.RerankOptions{
+			Enabled: s.enableReranker,
+			Verbose: false, // Server logs are already verbose enough
+		},
+	)
 
 	// Convert engine.SearchResult to API response format
 	results := make([]SearchResultItem, len(engineResults))
@@ -519,27 +424,21 @@ func (s *Server) handleFileAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Security: only allow files that were indexed (exist in our database)
-	// Check if file exists in any index
-	allowed := false
-	files, _ := filepath.Glob(filepath.Join(s.config.IndexDir, "*.db"))
-	for _, dbFile := range files {
-		dim, err := db.GetDimensionFromDB(dbFile)
-		if err != nil {
-			continue
-		}
-		projectDB, err := db.OpenProjectDB(dbFile, dim)
-		if err != nil {
-			continue
-		}
-		_, err = projectDB.GetFileByPath(filePath)
-		projectDB.Close()
-		if err == nil {
-			allowed = true
-			break
-		}
+	dim, err := db.GetDimension(r.Context(), s.config.DatabaseURL)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 	}
 
-	if !allowed {
+	projectDB, err := db.OpenProjectDB(s.config.DatabaseURL, dim)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer projectDB.Close()
+
+	_, err = projectDB.GetFileByPath(r.Context(), filePath)
+	if err != nil {
 		http.Error(w, "File not found in index", http.StatusNotFound)
 		return
 	}
@@ -596,8 +495,8 @@ func (s *Server) handleCreateIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate database path
-	dbPath := filepath.Join(s.config.IndexDir, generateDBName(absPath))
+	// Use configured database URL
+	dbPath := s.config.DatabaseURL
 
 	// Create cancellable context for this indexing operation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -699,16 +598,8 @@ func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get database path
-	dbPath := filepath.Join(s.config.IndexDir, generateDBName(indexPath))
-
-	// Check if index exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Index not found"})
-		return
-	}
+	// Use configured database URL
+	dbPath := s.config.DatabaseURL
 
 	// Get index status
 	status, err := s.engine.GetIndexStatus(dbPath, indexPath)
@@ -749,7 +640,7 @@ func (s *Server) handleUpdateIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get database path
-	dbPath := filepath.Join(s.config.IndexDir, generateDBName(req.IndexPath))
+	dbPath := s.config.DatabaseURL
 
 	// Check if index exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -1153,7 +1044,7 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get database path
-	dbPath := filepath.Join(s.config.IndexDir, generateDBName(req.IndexPath))
+	dbPath := s.config.DatabaseURL
 
 	// Check if index exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -1178,5 +1069,52 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Index deleted successfully",
 		"path":    req.IndexPath,
+	})
+}
+
+// handleHealth returns basic health status (liveness probe)
+// This endpoint checks if the server is running
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// handleReadiness returns readiness status (readiness probe)
+// This endpoint checks if the server can handle requests
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Verify PostgreSQL database connection
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	testDB, err := db.NewDB(ctx, s.config.DatabaseURL, 1024)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "not_ready",
+			"reason":    "database_unavailable",
+			"error":     err.Error(),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+		return
+	}
+	defer testDB.Close()
+
+	// Server is ready
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "ready",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"config": map[string]interface{}{
+			"embedding_model":  s.config.VoyageModel,
+			"reranker_enabled": s.enableReranker,
+		},
 	})
 }

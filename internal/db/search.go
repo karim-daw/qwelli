@@ -1,44 +1,44 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
-	"log"
-	"strings"
+
+	"github.com/lib/pq"
+	"github.com/pgvector/pgvector-go"
 )
 
 // BuildHNSWIndex creates the HNSW index conditionally if embeddings exist
-func (p *ProjectDB) BuildHNSWIndex() error {
+// For PostgreSQL, the index is already created in the schema, so this is a no-op
+// but we keep it for compatibility with the existing interface
+func (db *DB) BuildHNSWIndex(ctx context.Context) error {
 	// Check if embeddings table has any rows
 	var count int
-	err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check embeddings count: %w", err)
 	}
 
-	// Only create index if embeddings exist
+	// Index is already created in schema, nothing more to do
 	if count == 0 {
 		return nil
 	}
 
-	_, err = p.conn.Exec(`
-		CREATE INDEX IF NOT EXISTS hnsw_idx
-		ON embeddings USING HNSW (vector)
-		WITH (metric = 'cosine')
-	`)
-	return err
+	return nil
 }
 
-// RebuildHNSWIndex drops and recreates the HNSW index (required after embedding changes)
-func (p *ProjectDB) RebuildHNSWIndex() error {
+// RebuildHNSWIndex drops and recreates the HNSW index (required after bulk embedding changes)
+func (db *DB) RebuildHNSWIndex(ctx context.Context) error {
 	// Drop existing index (if exists)
-	_, err := p.conn.Exec("DROP INDEX IF EXISTS hnsw_idx")
+	_, err := db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_embeddings_hnsw")
 	if err != nil {
 		return fmt.Errorf("failed to drop HNSW index: %w", err)
 	}
 
 	// Check if embeddings exist before rebuilding
 	var count int
-	err = p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check embeddings count: %w", err)
 	}
@@ -48,11 +48,10 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 		return nil
 	}
 
-	// Rebuild from current embeddings
-	_, err = p.conn.Exec(`
-		CREATE INDEX hnsw_idx ON embeddings
-		USING HNSW(vector)
-		WITH (metric='cosine')
+	// Rebuild HNSW index with cosine distance
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX idx_embeddings_hnsw ON embeddings
+		USING hnsw (embedding vector_cosine_ops)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create HNSW index: %w", err)
@@ -61,27 +60,19 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 	return nil
 }
 
-func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
-	return p.SearchANNWithFilter(query, k, "")
+// SearchANN performs approximate nearest neighbor search
+func (db *DB) SearchANN(ctx context.Context, query []float32, k int) ([]SearchResult, error) {
+	return db.SearchANNWithFilter(ctx, query, k, "")
 }
 
 // SearchANNWithFilter performs ANN search with optional content type filtering
 // contentType can be "text", "image", or "" (empty string) for all types
-func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType string) ([]SearchResult, error) {
-	vecStr := vectorToString(query)
-
-	// Build WHERE clause for content type filtering
-	contentTypeFilter := ""
-	if contentType != "" {
-		contentTypeFilter = fmt.Sprintf(" AND c.content_type = '%s'", contentType)
-	}
-
+func (db *DB) SearchANNWithFilter(ctx context.Context, query []float32, k int, contentType string) ([]SearchResult, error) {
 	// When filtering by content type, fetch more candidates to ensure we get enough results
 	// after filtering. Use a multiplier to account for the distribution of content types.
 	candidateLimit := k
 	if contentType != "" {
 		// Fetch 3x more candidates when filtering to ensure we get enough results
-		// This is a heuristic - in practice, the distribution might vary
 		candidateLimit = k * 3
 		if candidateLimit < 50 {
 			candidateLimit = 50 // Minimum candidates to fetch
@@ -91,132 +82,105 @@ func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType stri
 		}
 	}
 
-	// Optimized CTE query: avoid double distance calculation
-	// Join with chunks table to get denormalized fields (no second JOIN needed)
-	queryStr := fmt.Sprintf(`
-		WITH ranked_embeddings AS (
-			SELECT
-				chunk_id,
-				array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
-			FROM embeddings
-			ORDER BY distance
-			LIMIT ?
-		)
-		SELECT
-			c.chunk_id,
-			c.file_path,
-			c.file_type,
-			c.content,
-			c.chunk_index,
-			c.total_chunks,
-			c.page_numbers,
-			c.content_type,
-			c.image_data,
-			r.distance
-		FROM ranked_embeddings r
-		JOIN chunks c ON r.chunk_id = c.chunk_id
-		WHERE 1=1%s
-		ORDER BY r.distance
-		LIMIT ?
-	`, vecStr, p.Dimension, contentTypeFilter)
+	// Build query with optional content type filter
+	var query_sql string
+	var rows *sql.Rows
+	var err error
 
-	rows, err := p.conn.Query(queryStr, candidateLimit, k)
+	queryVec := pgvector.NewVector(query)
+
+	if contentType != "" {
+		// Query with content type filter
+		query_sql = `
+			SELECT
+				c.chunk_id,
+				c.file_path,
+				c.file_type,
+				c.content,
+				c.chunk_index,
+				c.total_chunks,
+				c.page_numbers,
+				c.content_type,
+				c.image_data,
+				(e.embedding <=> $1) AS distance
+			FROM embeddings e
+			JOIN chunks c ON e.chunk_id = c.chunk_id
+			WHERE c.content_type = $2
+			ORDER BY distance ASC
+			LIMIT $3`
+
+		rows, err = db.QueryContext(ctx, query_sql, queryVec, contentType, candidateLimit)
+	} else {
+		// Query without filter
+		query_sql = `
+			SELECT
+				c.chunk_id,
+				c.file_path,
+				c.file_type,
+				c.content,
+				c.chunk_index,
+				c.total_chunks,
+				c.page_numbers,
+				c.content_type,
+				c.image_data,
+				(e.embedding <=> $1) AS distance
+			FROM embeddings e
+			JOIN chunks c ON e.chunk_id = c.chunk_id
+			ORDER BY distance ASC
+			LIMIT $2`
+
+		rows, err = db.QueryContext(ctx, query_sql, queryVec, k)
+	}
+
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ANN search failed: %w", err)
 	}
 	defer rows.Close()
 
-	var results []SearchResult
-	for rows.Next() {
-		var r SearchResult
-		var pageNumbersIface interface{} // DuckDB returns arrays as []interface{}
-		var imageData []byte
-		var contentTypeStr string
-
-		if err := rows.Scan(&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
-			&r.ChunkIndex, &r.TotalChunks, &pageNumbersIface, &contentTypeStr, &imageData, &r.Distance); err != nil {
-			return nil, err
-		}
-		// Parse page_numbers array
-		r.PageNumbers = parsePageNumbers(pageNumbersIface)
-		r.ContentType = contentTypeStr
-		if r.ContentType == "" {
-			r.ContentType = "text"
-		}
-		r.ImageData = imageData
-		results = append(results, r)
+	results, err := db.scanSearchResults(rows)
+	if err != nil {
+		return nil, err
 	}
+
+	// If we fetched more candidates for filtering, trim to k results
+	if len(results) > k {
+		return results[:k], nil
+	}
+
 	return results, nil
 }
 
-// parsePageNumbers parses DuckDB array (can be []interface{} or string) into []int
-func parsePageNumbers(iface interface{}) []int {
-	if iface == nil {
-		return []int{}
-	}
+// scanSearchResults scans SQL rows into SearchResult slice
+func (db *DB) scanSearchResults(rows *sql.Rows) ([]SearchResult, error) {
+	var results []SearchResult
 
-	// Handle []interface{} from DuckDB
-	if arr, ok := iface.([]interface{}); ok {
-		result := make([]int, 0, len(arr))
-		for _, v := range arr {
-			switch val := v.(type) {
-			case int:
-				result = append(result, val)
-			case int64:
-				result = append(result, int(val))
-			case int32:
-				result = append(result, int(val))
-			case int16:
-				result = append(result, int(val))
-			case int8:
-				result = append(result, int(val))
-			case float64:
-				result = append(result, int(val))
-			default:
-				// Log unexpected type for debugging
-				log.Printf("⚠️  parsePageNumbers: unexpected type %T for value %v", val, val)
-			}
+	for rows.Next() {
+		var r SearchResult
+		var pageNumbers pq.Int64Array
+
+		err := rows.Scan(
+			&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
+			&r.ChunkIndex, &r.TotalChunks, &pageNumbers,
+			&r.ContentType, &r.ImageData, &r.Distance,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-		return result
-	}
 
-	// Handle string format (fallback)
-	if s, ok := iface.(string); ok {
-		return parseIntArray(s)
-	}
+		// Convert pq.Int64Array to []int
+		r.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
 
-	// Debug: log if we can't parse
-	log.Printf("⚠️  parsePageNumbers: cannot parse type %T, value: %v", iface, iface)
-	return []int{}
-}
-
-// parseIntArray parses DuckDB array string format [1,2,3] into []int
-func parseIntArray(s string) []int {
-	if s == "" || s == "[]" {
-		return []int{}
-	}
-	// Remove brackets
-	s = strings.Trim(s, "[]")
-	if s == "" {
-		return []int{}
-	}
-	// Split by comma and parse
-	parts := strings.Split(s, ",")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		var val int
-		if _, err := fmt.Sscanf(part, "%d", &val); err == nil {
-			result = append(result, val)
+		// Set default content type if empty
+		if r.ContentType == "" {
+			r.ContentType = "text"
 		}
-	}
-	return result
-}
 
-func vectorToString(v []float32) string {
-	parts := make([]string, len(v))
-	for i, f := range v {
-		parts[i] = fmt.Sprintf("%g", f)
+		results = append(results, r)
 	}
-	return "[" + strings.Join(parts, ", ") + "]"
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+
+	return results, nil
 }

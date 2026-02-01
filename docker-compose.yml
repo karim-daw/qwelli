@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: qwelli-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qwelli}
+      POSTGRES_USER: ${POSTGRES_USER:-qwelli}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qwelli}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qwelli} -d ${POSTGRES_DB:-qwelli}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - qwelli-network
+
+  # Qwelli application
+  qwelli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qwelli-app
+    environment:
+      # Database connection - constructed from postgres service
+      DATABASE_URL: postgresql://${POSTGRES_USER:-qwelli}:${POSTGRES_PASSWORD:-qwelli}@postgres:5432/${POSTGRES_DB:-qwelli}?sslmode=disable
+      
+      # Voyage AI API configuration
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:?Voyage API key is required}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-multimodal-3}
+      
+      # Application settings
+      PORT: ${PORT:-8080}
+      ENABLE_RERANKER: ${ENABLE_RERANKER:-true}
+    
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    
+    restart: unless-stopped
+    networks:
+      - qwelli-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  qwelli-network:
+    driver: bridge

@@ -11,37 +11,27 @@ import (
 	"time"
 )
 
-// TODO: use env vars
 const (
-	// Default endpoints
-	DefaultEmbeddingEndpoint = "https://api.voyageai.com/v1/multimodalembeddings"
-	DefaultRerankEndpoint    = "https://api.voyageai.com/v1/rerank"
-
-	// Default models
-	DefaultEmbeddingModel = "voyage-multimodal-3"
-	DefaultRerankModel    = "rerank-2"
-
-	// Default timeouts
-	DefaultEmbeddingTimeout = 180 * time.Second // Longer for large batch operations
-	DefaultRerankTimeout    = 30 * time.Second  // Shorter for quick reranking
+	// Timeouts (hardcoded - rarely need customization)
+	EmbeddingTimeout = 180 * time.Second // Longer for large batch operations
+	RerankTimeout    = 30 * time.Second  // Shorter for quick reranking
 
 	// Retry settings
 	MaxRetries = 3
 )
 
 // ClientConfig holds configuration for the Voyage client
+// All fields come from environment variables via config.Config
 type ClientConfig struct {
-	APIKey string
+	APIKey string // Required: VOYAGE_API_KEY
 
-	// Embedding settings
-	EmbeddingModel    string
-	EmbeddingEndpoint string
-	EmbeddingTimeout  time.Duration
+	// Embedding settings (from .env)
+	EmbeddingModel    string // VOYAGE_MODEL (default: voyage-multimodal-3.5)
+	EmbeddingEndpoint string // VOYAGE_EMBEDDING_ENDPOINT (default: Voyage AI)
 
-	// Rerank settings
-	RerankModel    string
-	RerankEndpoint string
-	RerankTimeout  time.Duration
+	// Rerank settings (from .env)
+	RerankModel    string // VOYAGE_RERANK_MODEL (default: rerank-2)
+	RerankEndpoint string // VOYAGE_RERANK_ENDPOINT (default: Voyage AI)
 }
 
 // Client is a unified client for Voyage AI APIs (embeddings and reranking)
@@ -65,24 +55,18 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("Voyage API key is required")
 	}
 
-	// Apply defaults
+	// Validate required fields (should come from config.Config)
 	if cfg.EmbeddingModel == "" {
-		cfg.EmbeddingModel = DefaultEmbeddingModel
+		return nil, fmt.Errorf("embedding model is required")
 	}
 	if cfg.EmbeddingEndpoint == "" {
-		cfg.EmbeddingEndpoint = DefaultEmbeddingEndpoint
-	}
-	if cfg.EmbeddingTimeout == 0 {
-		cfg.EmbeddingTimeout = DefaultEmbeddingTimeout
+		return nil, fmt.Errorf("embedding endpoint is required")
 	}
 	if cfg.RerankModel == "" {
-		cfg.RerankModel = DefaultRerankModel
+		return nil, fmt.Errorf("rerank model is required")
 	}
 	if cfg.RerankEndpoint == "" {
-		cfg.RerankEndpoint = DefaultRerankEndpoint
-	}
-	if cfg.RerankTimeout == 0 {
-		cfg.RerankTimeout = DefaultRerankTimeout
+		return nil, fmt.Errorf("rerank endpoint is required")
 	}
 
 	client := &Client{
@@ -90,12 +74,12 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		embeddingModel:    cfg.EmbeddingModel,
 		embeddingEndpoint: cfg.EmbeddingEndpoint,
 		embeddingClient: &http.Client{
-			Timeout: cfg.EmbeddingTimeout,
+			Timeout: EmbeddingTimeout, // Hardcoded timeout
 		},
 		rerankModel:    cfg.RerankModel,
 		rerankEndpoint: cfg.RerankEndpoint,
 		rerankClient: &http.Client{
-			Timeout: cfg.RerankTimeout,
+			Timeout: RerankTimeout, // Hardcoded timeout
 		},
 	}
 

@@ -53,14 +53,8 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 		return fmt.Errorf("%w", err)
 	}
 
-	// Ensure index directory exists
-	if err := cfg.EnsureIndexDir(); err != nil {
-		return err
-	}
-
-	// Generate database name from folder path
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
+	// Use configured database URL
+	dbPath := cfg.DatabaseURL
 
 	fmt.Printf("📂 Indexing folder: %s\n", absPath)
 
@@ -69,25 +63,24 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 		return fmt.Errorf("folder does not exist: %s", absPath)
 	}
 
-	fmt.Printf("💾 Database: %s\n\n", dbPath)
+	fmt.Printf("🗄️  Database: PostgreSQL with pgvector\n\n")
 
-	// Use Voyage provider
-	enableMultimodal := multimodal || cfg.EnableMultimodal
-
-	// Create voyage client
+	// Create voyage client (always multimodal now)
 	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
+		APIKey:            cfg.VoyageAPIKey,
+		EmbeddingModel:    cfg.VoyageModel,
+		EmbeddingEndpoint: cfg.VoyageEmbeddingEndpoint,
+		RerankModel:       cfg.VoyageRerankModel,
+		RerankEndpoint:    cfg.VoyageRerankEndpoint,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create voyage client: %w", err)
 	}
 
-	// Create engine with voyage client
-	eng := engine.NewEngine(voyageClient, enableMultimodal)
+	// Create engine (always multimodal now)
+	eng := engine.NewEngine(voyageClient, true)
 
-	if enableMultimodal {
+	if true {
 		fmt.Printf("🖼️  Multimodal indexing enabled (text + images)\n")
 	}
 
@@ -121,9 +114,7 @@ func runIndex(folderPath string, incremental bool, multimodal bool) error {
 	var textChunks, imageChunks int
 	err = eng.IndexFolder(context.Background(), absPath, dbPath, incremental, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
-		if enableMultimodal {
-			progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)
-		}
+		progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)
 
 		// Clear previous line and print new progress
 		fmt.Print("\r" + strings.Repeat(" ", len(lastProgress)) + "\r")

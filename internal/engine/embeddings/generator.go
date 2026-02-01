@@ -188,19 +188,18 @@ func (g *EmbeddingGenerator) generateTextEmbeddings(ctx context.Context, chunks 
 
 // StoreChunksAndEmbeddings stores chunks and their embeddings in the database
 func StoreChunksAndEmbeddings(projectDB *db.ProjectDB, chunks []db.Chunk, embeddingMap map[int][]float32) error {
+	ctx := context.Background()
 	for i, chunk := range chunks {
-		if err := projectDB.InsertChunk(chunk); err != nil {
+		chunkID, err := projectDB.InsertChunk(ctx, chunk)
+		if err != nil {
 			log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
 			continue
 		}
 
 		// Only insert embedding if this chunk was successfully embedded
 		if emb, ok := embeddingMap[i]; ok {
-			if err := projectDB.InsertEmbedding(db.Embedding{
-				ChunkID: chunk.ChunkID,
-				Vector:  emb,
-			}); err != nil {
-				log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunk.ChunkID, err)
+			if err := projectDB.InsertEmbedding(ctx, chunkID, emb); err != nil {
+				log.Printf("⚠️  Failed to insert embedding for chunk %s: %v", chunkID, err)
 				continue
 			}
 		}

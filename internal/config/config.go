@@ -4,101 +4,102 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
-	"gopkg.in/yaml.v3"
+	"github.com/joho/godotenv"
 )
 
 // Config holds the application configuration
 type Config struct {
-	// Embedding provider settings
-	EmbeddingProvider string `yaml:"embedding_provider"` // "voyage" (default)
-	APIKey            string `yaml:"api_key"`
-	Model             string `yaml:"model"`
-	Endpoint          string `yaml:"endpoint"`
-
-	// Multimodal settings
-	EnableMultimodal bool   `yaml:"enable_multimodal"` // Enable multimodal embeddings (images)
-	ImageQuality     string `yaml:"image_quality"`     // "low", "medium", "high" (default: "medium")
-
-	// Reranker settings
-	EnableReranker   bool   `yaml:"enable_reranker"`   // Enable reranking of search results
-	RerankProvider   string `yaml:"rerank_provider"`   // "voyage" (default)
-	RerankModel      string `yaml:"rerank_model"`      // Reranker model to use
-	RerankEndpoint   string `yaml:"rerank_endpoint"`   // Custom reranker endpoint (optional)
-
-	// Local storage settings
-	IndexDir string `yaml:"index_dir"` // Where to store .db files
+	DatabaseURL             string // PostgreSQL connection string
+	VoyageAPIKey            string // Voyage AI API key
+	VoyageModel             string // Embedding model (default: voyage-multimodal-3.5)
+	VoyageEmbeddingEndpoint string // Embedding API endpoint (default: Voyage AI)
+	VoyageRerankModel       string // Rerank model (default: rerank-2)
+	VoyageRerankEndpoint    string // Rerank API endpoint (default: Voyage AI)
+	Port                    int    // Server port (default: 8080)
+	EnableReranker          bool   // Enable reranking of search results (default: true)
 }
 
-// DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	homeDir, _ := os.UserHomeDir()
-
-	return &Config{
-		EmbeddingProvider: "voyage",
-		APIKey:            os.Getenv("QWELLI_EMBEDDING_KEY"),
-		Model:             os.Getenv("QWELLI_EMBEDDING_MODEL"),
-		Endpoint:          os.Getenv("QWELLI_EMBEDDING_ENDPOINT"),
-		EnableMultimodal:  true, // Default to true for Voyage
-		ImageQuality:      "medium",
-		EnableReranker:    true, // Default to true (enabled by default)
-		RerankProvider:    "voyage",
-		RerankModel:       os.Getenv("QWELLI_RERANK_MODEL"),
-		RerankEndpoint:    os.Getenv("QWELLI_RERANK_ENDPOINT"),
-		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
-	}
-}
-
-// ConfigPath returns the path to the config file
-func ConfigPath() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".qwelli", "config.yaml")
-}
-
-// Load loads the configuration from disk
+// Load loads configuration from environment variables
+// Automatically loads .env file if it exists in current directory or parent directories
 func Load() (*Config, error) {
-	configPath := ConfigPath()
+	// Try to load .env file (silently ignore if not found)
+	loadDotEnv()
 
-	// If config doesn't exist, return default
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("config not found. Run 'qwelli init' first")
+	cfg := &Config{
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		VoyageAPIKey:            os.Getenv("VOYAGE_API_KEY"),
+		VoyageModel:             getEnv("VOYAGE_MODEL", "voyage-multimodal-3.5"),
+		VoyageEmbeddingEndpoint: getEnv("VOYAGE_EMBEDDING_ENDPOINT", "https://api.voyageai.com/v1/multimodalembeddings"),
+		VoyageRerankModel:       getEnv("VOYAGE_RERANK_MODEL", "rerank-2"),
+		VoyageRerankEndpoint:    getEnv("VOYAGE_RERANK_ENDPOINT", "https://api.voyageai.com/v1/rerank"),
+		Port:                    getEnvAsInt("PORT", 8080),
+		EnableReranker:          getEnvAsBool("ENABLE_RERANKER", true),
 	}
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
+	// Validate required fields
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL environment variable is required\n\nTip: Create a .env file with:\n  DATABASE_URL=postgresql://user:pass@host:5432/dbname\n  VOYAGE_API_KEY=your_key")
+	}
+	if cfg.VoyageAPIKey == "" {
+		return nil, fmt.Errorf("VOYAGE_API_KEY environment variable is required\n\nTip: Create a .env file with:\n  DATABASE_URL=postgresql://user:pass@host:5432/dbname\n  VOYAGE_API_KEY=your_key")
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	return &cfg, nil
+	return cfg, nil
 }
 
-// Save saves the configuration to disk
-func (c *Config) Save() error {
-	configPath := ConfigPath()
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+// loadDotEnv tries to load .env file from current directory or parent directories
+// It silently ignores if the file doesn't exist
+func loadDotEnv() {
+	// Try current directory first
+	if err := godotenv.Load(); err == nil {
+		return
 	}
 
-	data, err := yaml.Marshal(c)
+	// Try finding .env in parent directories (up to 5 levels)
+	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
+		return
 	}
 
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
+	dir := cwd
+	for i := 0; i < 5; i++ {
+		envPath := filepath.Join(dir, ".env")
+		if _, err := os.Stat(envPath); err == nil {
+			_ = godotenv.Load(envPath)
+			return
+		}
 
-	return nil
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached root
+		}
+		dir = parent
+	}
 }
 
-// EnsureIndexDir creates the index directory if it doesn't exist
-func (c *Config) EnsureIndexDir() error {
-	return os.MkdirAll(c.IndexDir, 0755)
+// Helper functions
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvAsInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intVal, err := strconv.Atoi(value); err == nil {
+			return intVal
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return value == "true" || value == "1"
+	}
+	return defaultValue
 }

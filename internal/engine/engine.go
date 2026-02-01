@@ -14,7 +14,6 @@ import (
 	"github.com/karim-daw/qwelli/internal/engine/embeddings"
 	"github.com/karim-daw/qwelli/internal/engine/extraction"
 	"github.com/karim-daw/qwelli/internal/engine/fileprocessor"
-	"github.com/karim-daw/qwelli/internal/engine/search"
 	"github.com/karim-daw/qwelli/internal/voyage"
 )
 
@@ -30,20 +29,16 @@ type SearchResult struct {
 
 type Engine struct {
 	voyageClient          *voyage.Client
-	enableMultimodal      bool
-	contentTypeMode       fileprocessor.ContentTypeMode
 	fileProcessingService *fileprocessor.FileProcessingService
 }
 
-// NewEngine creates an engine using a Voyage client
-func NewEngine(voyageClient *voyage.Client, enableMultimodal bool) *Engine {
+// NewEngine creates an engine using a Voyage client (always multimodal now)
+func NewEngine(voyageClient *voyage.Client, _ bool) *Engine {
 	processingConfig := fileprocessor.DefaultProcessingConfig()
-	processingConfig.EnableMultimodal = enableMultimodal
+	processingConfig.EnableMultimodal = true // Always enabled
 
 	return &Engine{
 		voyageClient:          voyageClient,
-		enableMultimodal:      enableMultimodal,
-		contentTypeMode:       fileprocessor.ContentTypeBoth,
 		fileProcessingService: fileprocessor.NewFileProcessingService(processingConfig),
 	}
 }
@@ -53,11 +48,9 @@ func (e *Engine) getEmbedder() (*embeddings.Embedder, error) {
 	return embeddings.NewEmbedder(e.voyageClient)
 }
 
-// SetContentTypeMode sets the content type mode for indexing
+// SetContentTypeMode is deprecated - multimodal is always enabled
 func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
-	e.contentTypeMode = mode
-	// Update the file processing service config
-	e.fileProcessingService.SetContentTypeMode(mode)
+	// No-op: multimodal is always enabled now
 }
 
 func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, incremental bool, progressCallback func(current, total int, filename string), phaseCallback ...func(phase, message string, current, total int)) error {
@@ -84,7 +77,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	if existingDim, err := db.GetDimensionFromDB(dbPath); err == nil {
 		tempDB, _ := db.OpenProjectDB(dbPath, existingDim)
 		if tempDB != nil {
-			storedModel, _ := tempDB.GetMetadata("model")
+			storedModel, _ := tempDB.GetMetadata(context.Background(), "model")
 			tempDB.Close()
 			if storedModel != "" && storedModel != currentModel {
 				fmt.Printf("⚠️  Model changed from '%s' to '%s' - recreating database...\n", storedModel, currentModel)
@@ -101,9 +94,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	defer projectDB.Close()
 
 	// Store project metadata
-	projectDB.SetMetadata("dimension", fmt.Sprintf("%d", dimension))
-	projectDB.SetMetadata("model", currentModel)
-	projectDB.SetMetadata("folder_path", folderPath)
+	projectDB.SetMetadata(context.Background(), "dimension", fmt.Sprintf("%d", dimension))
+	projectDB.SetMetadata(context.Background(), "model", currentModel)
+	projectDB.SetMetadata(context.Background(), "folder_path", folderPath)
 
 	// Determine which files to process
 	var filesToProcess []string
@@ -119,9 +112,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 
 		// Delete removed files
 		for _, path := range changes.ToDelete {
-			file, err := projectDB.GetFileByPath(path)
+			file, err := projectDB.GetFileByPath(context.Background(), path)
 			if err == nil {
-				if err := projectDB.DeleteFile(file.FileID); err != nil {
+				if err := projectDB.DeleteFile(context.Background(), file.FileID); err != nil {
 					log.Printf("⚠️  Failed to delete file %s: %v", path, err)
 				} else {
 					needsRebuild = true
@@ -135,9 +128,9 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 
 		// For updated files, delete existing data first
 		for _, path := range changes.ToUpdate {
-			file, err := projectDB.GetFileByPath(path)
+			file, err := projectDB.GetFileByPath(context.Background(), path)
 			if err == nil {
-				if err := projectDB.DeleteFile(file.FileID); err != nil {
+				if err := projectDB.DeleteFile(context.Background(), file.FileID); err != nil {
 					log.Printf("⚠️  Failed to delete old file data %s: %v", path, err)
 				} else {
 					needsRebuild = true
@@ -222,7 +215,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			IndexedAt:  time.Now(),
 		}
 
-		if err := projectDB.InsertFile(file); err != nil {
+		if err := projectDB.InsertFile(context.Background(), file); err != nil {
 			log.Printf("⚠️  Failed to insert file %s: %v", absPath, err)
 			continue
 		}
@@ -303,7 +296,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 			emitPhase("embedding", fmt.Sprintf("Generating embeddings: %d/%d chunks", current, total), current, total)
 		}
 
-		embeddingGen := embeddings.NewEmbeddingGenerator(embedder, e.enableMultimodal)
+		embeddingGen := embeddings.NewEmbeddingGenerator(embedder, true)
 		embeddingMap, err := embeddingGen.GenerateEmbeddings(ctx, allChunks, embeddingProgressCallback)
 		if err != nil {
 			// Check if error is due to cancellation
@@ -332,7 +325,7 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 		log.Printf("🔨 Rebuilding HNSW index...")
 		emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
 		indexStart := time.Now()
-		if err := projectDB.RebuildHNSWIndex(); err != nil {
+		if err := projectDB.RebuildHNSWIndex(context.Background()); err != nil {
 			return fmt.Errorf("failed to rebuild HNSW index: %w", err)
 		}
 		log.Printf("✅ HNSW index rebuilt in %v", time.Since(indexStart))
@@ -357,37 +350,16 @@ func (e *Engine) Search(query string, dbPath string, topK int) ([]SearchResult, 
 	return e.SearchWithStrategy(query, dbPath, topK, "", "semantic")
 }
 
-// SearchWithFilter performs a search with content type filtering using the default (semantic) strategy
+// SearchWithFilter is deprecated - use SearchWithStrategy instead (content type filtering removed)
 func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, contentType string) ([]SearchResult, error) {
-	return e.SearchWithStrategy(query, dbPath, topK, contentType, "semantic")
+	return e.SearchWithStrategy(query, dbPath, topK, "", "semantic")
 }
 
 // SearchWithStrategy performs a search using the specified strategy
 // strategy can be "semantic", "keyword", or "hybrid"
+// Note: contentType parameter is deprecated (always searches all content in multimodal mode)
 func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
-	// Get the search strategy
-	var strategy search.SearchStrategy
-
-	// Helper to create semantic strategy using the voyage client
-	createSemanticStrategy := func() *search.SemanticSearchStrategy {
-		return search.NewSemanticSearchStrategy(e.voyageClient)
-	}
-
-	switch strategyName {
-	case "semantic":
-		strategy = createSemanticStrategy()
-	case "keyword":
-		strategy = search.NewKeywordSearchStrategy()
-	case "hybrid":
-		semantic := createSemanticStrategy()
-		keyword := search.NewKeywordSearchStrategy()
-		strategy = search.NewHybridSearchStrategy(semantic, keyword)
-	default:
-		// Fall back to semantic
-		strategy = createSemanticStrategy()
-	}
-
-	// Open database - we need dimension, so try to get it from DB first
+	// Open database
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		// If dimension not found, we need to create embedder to get dimension
@@ -408,8 +380,53 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	}
 	defer projectDB.Close()
 
-	// Perform search using strategy
-	results, err := strategy.Search(query, projectDB, topK, contentType)
+	ctx := context.Background()
+	var results []db.SearchResult
+
+	// Perform search based on strategy (inlined for simplicity)
+	switch strategyName {
+	case "keyword":
+		// Full-text search
+		results, err = projectDB.SearchFTS(ctx, query, topK, "")
+
+	case "hybrid":
+		// Hybrid: combine semantic + keyword
+		embedder, err := e.getEmbedder()
+		if err != nil {
+			return nil, err
+		}
+		queryVec, err := embedder.Embed(query)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get both semantic and keyword results
+		semanticResults, err := projectDB.SearchANN(ctx, queryVec, topK*2)
+		if err != nil {
+			return nil, fmt.Errorf("semantic search failed: %w", err)
+		}
+
+		keywordResults, err := projectDB.SearchFTS(ctx, query, topK*2, "")
+		if err != nil {
+			return nil, fmt.Errorf("keyword search failed: %w", err)
+		}
+
+		// Merge results with weighted scoring (70% semantic, 30% keyword)
+		results = e.mergeSearchResults(semanticResults, keywordResults, topK)
+
+	default: // "semantic" or fallback
+		// Vector similarity search
+		embedder, err := e.getEmbedder()
+		if err != nil {
+			return nil, err
+		}
+		queryVec, err := embedder.Embed(query)
+		if err != nil {
+			return nil, err
+		}
+		results, err = projectDB.SearchANN(ctx, queryVec, topK)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -455,14 +472,14 @@ func (e *Engine) GetIndexStats(dbPath string) (int, error) {
 	defer projectDB.Close()
 
 	// Count chunks (which have embeddings)
-	files, err := projectDB.GetAllFiles()
+	files, err := projectDB.GetAllFiles(context.Background())
 	if err != nil {
 		return 0, err
 	}
 
 	totalChunks := 0
 	for _, file := range files {
-		chunks, err := projectDB.GetChunksForFile(file.FileID)
+		chunks, err := projectDB.GetChunksForFile(context.Background(), file.FileID)
 		if err != nil {
 			continue
 		}
@@ -482,7 +499,7 @@ func (e *Engine) GetFolderPath(dbPath string) (string, error) {
 		return "", err
 	}
 	defer projectDB.Close()
-	return projectDB.GetMetadata("folder_path")
+	return projectDB.GetMetadata(context.Background(), "folder_path")
 }
 
 // GetIndexStatus returns the status of an index showing pending changes
@@ -541,7 +558,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 
 	// Populate ToDelete
 	for _, path := range changes.ToDelete {
-		file, err := projectDB.GetFileByPath(path)
+		file, err := projectDB.GetFileByPath(context.Background(), path)
 		if err != nil {
 			continue
 		}
@@ -555,7 +572,7 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 	}
 
 	// Get total counts
-	allFiles, err := projectDB.GetAllFiles()
+	allFiles, err := projectDB.GetAllFiles(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -563,4 +580,63 @@ func (e *Engine) GetIndexStatus(dbPath, folderPath string) (*differ.IndexStatus,
 	status.UpToDate = status.Total - len(changes.ToUpdate) - len(changes.ToDelete)
 
 	return status, nil
+}
+
+// mergeSearchResults merges semantic and keyword results with weighted scoring
+// Uses 70% semantic weight and 30% keyword weight
+func (e *Engine) mergeSearchResults(semantic, keyword []db.SearchResult, topK int) []db.SearchResult {
+	const semanticWeight = 0.7
+	const keywordWeight = 0.3
+
+	// Create a map to track results by chunk ID
+	resultMap := make(map[string]*db.SearchResult)
+
+	// Process semantic results
+	for i := range semantic {
+		chunkID := semantic[i].ChunkID
+		score := (1.0 - semantic[i].Distance) * semanticWeight
+
+		if existing, ok := resultMap[chunkID]; ok {
+			existing.Distance = existing.Distance - score
+		} else {
+			result := semantic[i]
+			result.Distance = 1.0 - score
+			resultMap[chunkID] = &result
+		}
+	}
+
+	// Process keyword results
+	for i := range keyword {
+		chunkID := keyword[i].ChunkID
+		score := (1.0 - keyword[i].Distance) * keywordWeight
+
+		if existing, ok := resultMap[chunkID]; ok {
+			existing.Distance = existing.Distance - score
+		} else {
+			result := keyword[i]
+			result.Distance = 1.0 - score
+			resultMap[chunkID] = &result
+		}
+	}
+
+	// Convert map to slice and sort by distance
+	results := make([]db.SearchResult, 0, len(resultMap))
+	for _, result := range resultMap {
+		results = append(results, *result)
+	}
+
+	// Sort by distance (ascending - lower is better)
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Distance < results[i].Distance {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	// Return topK results
+	if len(results) > topK {
+		return results[:topK]
+	}
+	return results
 }

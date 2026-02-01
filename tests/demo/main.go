@@ -130,20 +130,25 @@ func main() {
 		contents = append(contents, string(content))
 	}
 
+	ctx := context.Background()
+
 	// Insert files
 	for _, file := range filesList {
-		if err := projectDB.InsertFile(file); err != nil {
+		if err := projectDB.InsertFile(ctx, file); err != nil {
 			log.Printf("⚠️  Failed to insert file %s: %v", file.Path, err)
 			continue
 		}
 	}
 
 	// Insert chunks
-	for _, chunk := range chunksList {
-		if err := projectDB.InsertChunk(chunk); err != nil {
+	for i, chunk := range chunksList {
+		chunkID, err := projectDB.InsertChunk(ctx, chunk)
+		if err != nil {
 			log.Printf("⚠️  Failed to insert chunk for %s: %v", chunk.FilePath, err)
 			continue
 		}
+		// Update chunk ID for embedding insertion
+		chunksList[i].ChunkID = chunkID
 	}
 
 	// Generate embeddings
@@ -154,7 +159,7 @@ func main() {
 
 	// Insert embeddings
 	for i, vec := range embeddings {
-		if err := projectDB.InsertEmbedding(db.Embedding{ChunkID: chunksList[i].ChunkID, Vector: vec}); err != nil {
+		if err := projectDB.InsertEmbedding(ctx, chunksList[i].ChunkID, vec); err != nil {
 			log.Printf("⚠️  Failed to insert embedding for %s: %v", chunksList[i].FilePath, err)
 			continue
 		}
@@ -163,7 +168,7 @@ func main() {
 
 	// Build index
 	fmt.Println("\n🔍 Building HNSW index...")
-	if err := projectDB.BuildHNSWIndex(); err != nil {
+	if err := projectDB.BuildHNSWIndex(ctx); err != nil {
 		log.Fatalf("Failed to build index: %v", err)
 	}
 
@@ -178,7 +183,7 @@ func main() {
 
 	for _, q := range queries {
 		vec, _ := embedder.Embed(q)
-		results, _ := projectDB.SearchANN(vec, 3)
+		results, _ := projectDB.SearchANN(ctx, vec, 3)
 		fmt.Printf("\n  \"%s\":\n", q)
 		for i, r := range results {
 			fmt.Printf("    %d. %s (%.4f)\n", i+1, filepath.Base(r.FilePath), r.Distance)

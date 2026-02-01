@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestSearchANNWithFilter_CandidateLimit(t *testing.T) {
 		IndexedAt:  time.Now(),
 	}
 
-	if err := pdb.InsertFile(testFile); err != nil {
+	if err := pdb.InsertFile(context.Background(), testFile); err != nil {
 		t.Fatalf("InsertFile() error = %v", err)
 	}
 
@@ -50,7 +51,8 @@ func TestSearchANNWithFilter_CandidateLimit(t *testing.T) {
 			PageNumbers: []int{1},
 		}
 		textChunks = append(textChunks, textChunk)
-		if err := pdb.InsertChunk(textChunk); err != nil {
+		_, err = pdb.InsertChunk(context.Background(), textChunk)
+		if err != nil {
 			t.Fatalf("InsertChunk() text %d error = %v", i, err)
 		}
 	}
@@ -69,7 +71,8 @@ func TestSearchANNWithFilter_CandidateLimit(t *testing.T) {
 			PageNumbers: []int{1},
 		}
 		imageChunks = append(imageChunks, imageChunk)
-		if err := pdb.InsertChunk(imageChunk); err != nil {
+		_, err = pdb.InsertChunk(context.Background(), imageChunk)
+		if err != nil {
 			t.Fatalf("InsertChunk() image %d error = %v", i, err)
 		}
 	}
@@ -79,34 +82,28 @@ func TestSearchANNWithFilter_CandidateLimit(t *testing.T) {
 
 	// Text embeddings are closer (lower distance)
 	for i, chunk := range textChunks {
-		textEmbedding := Embedding{
-			ChunkID: chunk.ChunkID,
-			Vector:  []float32{0.1 + float32(i)*0.01, 0.2, 0.3, 0.4},
-		}
-		if err := pdb.InsertEmbedding(textEmbedding); err != nil {
+		vec := []float32{0.1 + float32(i)*0.01, 0.2, 0.3, 0.4}
+		if err := pdb.InsertEmbedding(context.Background(), chunk.ChunkID, vec); err != nil {
 			t.Fatalf("InsertEmbedding() text %d error = %v", i, err)
 		}
 	}
 
 	// Image embeddings are further (higher distance)
 	for i, chunk := range imageChunks {
-		imageEmbedding := Embedding{
-			ChunkID: chunk.ChunkID,
-			Vector:  []float32{0.5 + float32(i)*0.01, 0.6, 0.7, 0.8},
-		}
-		if err := pdb.InsertEmbedding(imageEmbedding); err != nil {
+		vec := []float32{0.5 + float32(i)*0.01, 0.6, 0.7, 0.8}
+		if err := pdb.InsertEmbedding(context.Background(), chunk.ChunkID, vec); err != nil {
 			t.Fatalf("InsertEmbedding() image %d error = %v", i, err)
 		}
 	}
 
 	// Build index
-	if err := pdb.BuildHNSWIndex(); err != nil {
+	if err := pdb.BuildHNSWIndex(context.Background()); err != nil {
 		t.Fatalf("BuildHNSWIndex() error = %v", err)
 	}
 
 	// Test: Request 5 image results, but top 10 results are all text
 	// The query should fetch more candidates (3x = 15) to find the images
-	imageResults, err := pdb.SearchANNWithFilter(queryVec, 5, "image")
+	imageResults, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 5, "image")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() image error = %v", err)
 	}
@@ -124,7 +121,7 @@ func TestSearchANNWithFilter_CandidateLimit(t *testing.T) {
 	}
 
 	// Test: Request 5 text results - should get them easily
-	textResults, err := pdb.SearchANNWithFilter(queryVec, 5, "text")
+	textResults, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 5, "text")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() text error = %v", err)
 	}
@@ -154,7 +151,7 @@ func TestSearchANNWithFilter_EmptyResults(t *testing.T) {
 
 	// Search with no data in database
 	queryVec := []float32{0.1, 0.2, 0.3, 0.4}
-	results, err := pdb.SearchANNWithFilter(queryVec, 10, "")
+	results, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 10, "")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() error = %v", err)
 	}
@@ -164,7 +161,7 @@ func TestSearchANNWithFilter_EmptyResults(t *testing.T) {
 	}
 
 	// Search with filter for non-existent content type
-	results, err = pdb.SearchANNWithFilter(queryVec, 10, "image")
+	results, err = pdb.SearchANNWithFilter(context.Background(), queryVec, 10, "image")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() image error = %v", err)
 	}
@@ -187,7 +184,7 @@ func TestSearchANNWithFilter_MinMaxCandidateLimit(t *testing.T) {
 
 	// Test with k=1 (should use minimum candidate limit of 50)
 	queryVec := []float32{0.1, 0.2, 0.3, 0.4}
-	results, err := pdb.SearchANNWithFilter(queryVec, 1, "image")
+	results, err := pdb.SearchANNWithFilter(context.Background(), queryVec, 1, "image")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() k=1 error = %v", err)
 	}
@@ -195,7 +192,7 @@ func TestSearchANNWithFilter_MinMaxCandidateLimit(t *testing.T) {
 	_ = results
 
 	// Test with k=500 (should cap at maximum candidate limit of 1000)
-	results, err = pdb.SearchANNWithFilter(queryVec, 500, "image")
+	results, err = pdb.SearchANNWithFilter(context.Background(), queryVec, 500, "image")
 	if err != nil {
 		t.Fatalf("SearchANNWithFilter() k=500 error = %v", err)
 	}

@@ -1,0 +1,58 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+*.db
+*.sqlite
+.qwelli/
+dist/
+build/
+
+# Tests
+*_test.go
+test/
+tests/
+testdata/
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+.env
+.env.*
+
+# Node (for web UI)
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
