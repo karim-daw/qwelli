@@ -1018,7 +1018,7 @@ func (s *Server) handleCancelIndex(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDeleteIndex deletes an index database
+// handleDeleteIndex deletes an index (all files matching the index path prefix)
 func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1043,19 +1043,27 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get database path
-	dbPath := s.config.DatabaseURL
-
-	// Check if index exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	// Open database connection
+	dim, err := db.GetDimension(r.Context(), s.config.DatabaseURL)
+	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Index not found"})
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Database connection error"})
 		return
 	}
 
-	// Delete the database file
-	if err := os.Remove(dbPath); err != nil {
+	projectDB, err := db.OpenProjectDB(s.config.DatabaseURL, dim)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Database connection error"})
+		return
+	}
+	defer projectDB.Close()
+
+	// Delete all files matching the index path prefix (cascade deletes chunks and embeddings)
+	deleted, err := projectDB.DeleteFilesByPathPrefix(r.Context(), req.IndexPath)
+	if err != nil {
 		log.Printf("Failed to delete index: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1063,11 +1071,18 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🗑️  Deleted index: %s", dbPath)
+	if deleted == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Index not found"})
+		return
+	}
+
+	log.Printf("🗑️  Deleted index: %s (%d files)", req.IndexPath, deleted)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Index deleted successfully",
+		"message": fmt.Sprintf("Index deleted successfully (%d files)", deleted),
 		"path":    req.IndexPath,
 	})
 }
