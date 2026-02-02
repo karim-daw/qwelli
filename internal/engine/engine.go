@@ -357,7 +357,7 @@ func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, content
 
 // SearchWithStrategy performs a search using the specified strategy
 // strategy can be "semantic", "keyword", or "hybrid"
-// Note: contentType parameter is deprecated (always searches all content in multimodal mode)
+// contentType can be "text", "image", or "" (empty for all types)
 func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
 	// Open database
 	dim, err := db.GetDimensionFromDB(dbPath)
@@ -386,8 +386,8 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	// Perform search based on strategy (inlined for simplicity)
 	switch strategyName {
 	case "keyword":
-		// Full-text search
-		results, err = projectDB.SearchFTS(ctx, query, topK, "")
+		// Full-text search with content type filter
+		results, err = projectDB.SearchFTS(ctx, query, topK, contentType)
 
 	case "hybrid":
 		// Hybrid: combine semantic + keyword
@@ -400,13 +400,13 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 			return nil, err
 		}
 
-		// Get both semantic and keyword results
-		semanticResults, err := projectDB.SearchANN(ctx, queryVec, topK*2)
+		// Get both semantic and keyword results with content type filter
+		semanticResults, err := projectDB.SearchANNWithFilter(ctx, queryVec, topK*2, contentType)
 		if err != nil {
 			return nil, fmt.Errorf("semantic search failed: %w", err)
 		}
 
-		keywordResults, err := projectDB.SearchFTS(ctx, query, topK*2, "")
+		keywordResults, err := projectDB.SearchFTS(ctx, query, topK*2, contentType)
 		if err != nil {
 			return nil, fmt.Errorf("keyword search failed: %w", err)
 		}
@@ -415,7 +415,7 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 		results = e.mergeSearchResults(semanticResults, keywordResults, topK)
 
 	default: // "semantic" or fallback
-		// Vector similarity search
+		// Vector similarity search with content type filter
 		embedder, err := e.getEmbedder()
 		if err != nil {
 			return nil, err
@@ -424,7 +424,7 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 		if err != nil {
 			return nil, err
 		}
-		results, err = projectDB.SearchANN(ctx, queryVec, topK)
+		results, err = projectDB.SearchANNWithFilter(ctx, queryVec, topK, contentType)
 	}
 
 	if err != nil {
