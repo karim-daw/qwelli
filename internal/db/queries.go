@@ -337,6 +337,24 @@ func (db *DB) GetEmbedding(ctx context.Context, chunkID string) (*Embedding, err
 	return &e, nil
 }
 
+// DeleteFilesByPathPrefix deletes all files whose path starts with the given prefix
+// PostgreSQL handles cascade deletion automatically via foreign keys (chunks, embeddings)
+func (db *DB) DeleteFilesByPathPrefix(ctx context.Context, pathPrefix string) (int64, error) {
+	query := `DELETE FROM files WHERE path LIKE $1`
+
+	result, err := db.ExecContext(ctx, query, pathPrefix+"%")
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete files: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
 // Helper functions
 
 // convertInt64ArrayToIntSlice converts pq.Int64Array to []int
