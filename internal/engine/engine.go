@@ -96,7 +96,12 @@ func (e *Engine) IndexFolder(ctx context.Context, folderPath, dbPath string, inc
 	// Store project metadata
 	projectDB.SetMetadata(context.Background(), "dimension", fmt.Sprintf("%d", dimension))
 	projectDB.SetMetadata(context.Background(), "model", currentModel)
-	projectDB.SetMetadata(context.Background(), "folder_path", folderPath)
+
+	// Create index entry for this folder
+	indexName := filepath.Base(folderPath)
+	if err := projectDB.CreateIndex(context.Background(), indexName, folderPath); err != nil {
+		log.Printf("⚠️  Failed to create index entry: %v", err)
+	}
 
 	// Determine which files to process
 	var filesToProcess []string
@@ -359,6 +364,14 @@ func (e *Engine) SearchWithFilter(query string, dbPath string, topK int, content
 // strategy can be "semantic", "keyword", or "hybrid"
 // contentType can be "text", "image", or "" (empty for all types)
 func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, contentType string, strategyName string) ([]SearchResult, error) {
+	return e.SearchWithStrategyAndPath(query, dbPath, topK, contentType, strategyName, "")
+}
+
+// SearchWithStrategyAndPath performs a search using the specified strategy with optional path filtering
+// strategy can be "semantic", "keyword", or "hybrid"
+// contentType can be "text", "image", or "" (empty for all types)
+// pathPrefix filters results to only include files under the given path (or "" for all)
+func (e *Engine) SearchWithStrategyAndPath(query string, dbPath string, topK int, contentType string, strategyName string, pathPrefix string) ([]SearchResult, error) {
 	// Open database
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
@@ -386,8 +399,8 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 	// Perform search based on strategy (inlined for simplicity)
 	switch strategyName {
 	case "keyword":
-		// Full-text search with content type filter
-		results, err = projectDB.SearchFTS(ctx, query, topK, contentType)
+		// Full-text search with content type and path filters
+		results, err = projectDB.SearchFTSWithPathFilter(ctx, query, topK, contentType, pathPrefix)
 
 	case "hybrid":
 		// Hybrid: combine semantic + keyword
@@ -400,13 +413,13 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 			return nil, err
 		}
 
-		// Get both semantic and keyword results with content type filter
-		semanticResults, err := projectDB.SearchANNWithFilter(ctx, queryVec, topK*2, contentType)
+		// Get both semantic and keyword results with content type and path filters
+		semanticResults, err := projectDB.SearchANNWithPathFilter(ctx, queryVec, topK*2, contentType, pathPrefix)
 		if err != nil {
 			return nil, fmt.Errorf("semantic search failed: %w", err)
 		}
 
-		keywordResults, err := projectDB.SearchFTS(ctx, query, topK*2, contentType)
+		keywordResults, err := projectDB.SearchFTSWithPathFilter(ctx, query, topK*2, contentType, pathPrefix)
 		if err != nil {
 			return nil, fmt.Errorf("keyword search failed: %w", err)
 		}
@@ -415,7 +428,7 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 		results = e.mergeSearchResults(semanticResults, keywordResults, topK)
 
 	default: // "semantic" or fallback
-		// Vector similarity search with content type filter
+		// Vector similarity search with content type and path filters
 		embedder, err := e.getEmbedder()
 		if err != nil {
 			return nil, err
@@ -424,7 +437,7 @@ func (e *Engine) SearchWithStrategy(query string, dbPath string, topK int, conte
 		if err != nil {
 			return nil, err
 		}
-		results, err = projectDB.SearchANNWithFilter(ctx, queryVec, topK, contentType)
+		results, err = projectDB.SearchANNWithPathFilter(ctx, queryVec, topK, contentType, pathPrefix)
 	}
 
 	if err != nil {

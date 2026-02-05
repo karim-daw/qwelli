@@ -355,6 +355,79 @@ func (db *DB) DeleteFilesByPathPrefix(ctx context.Context, pathPrefix string) (i
 	return rowsAffected, nil
 }
 
+// Index represents an indexed folder
+type Index struct {
+	ID        string
+	Name      string
+	Path      string
+	DocCount  int
+	CreatedAt string
+}
+
+// CreateIndex inserts a new index record
+func (db *DB) CreateIndex(ctx context.Context, name, path string) error {
+	query := `
+		INSERT INTO indexes (name, path)
+		VALUES ($1, $2)
+		ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name`
+
+	_, err := db.ExecContext(ctx, query, name, path)
+	if err != nil {
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+	return nil
+}
+
+// GetIndexes returns all indexes with document counts
+func (db *DB) GetIndexes(ctx context.Context) ([]Index, error) {
+	query := `
+		SELECT 
+			i.id, 
+			i.name, 
+			i.path, 
+			i.created_at,
+			COUNT(f.file_id) as doc_count
+		FROM indexes i
+		LEFT JOIN files f ON f.path LIKE i.path || '/%'
+		GROUP BY i.id, i.name, i.path, i.created_at
+		ORDER BY i.name`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query indexes: %w", err)
+	}
+	defer rows.Close()
+
+	var indexes []Index
+	for rows.Next() {
+		var idx Index
+		if err := rows.Scan(&idx.ID, &idx.Name, &idx.Path, &idx.CreatedAt, &idx.DocCount); err != nil {
+			return nil, fmt.Errorf("failed to scan index: %w", err)
+		}
+		indexes = append(indexes, idx)
+	}
+
+	return indexes, nil
+}
+
+// DeleteIndex removes an index and its associated files
+func (db *DB) DeleteIndex(ctx context.Context, path string) (int64, error) {
+	// Delete files first (cascades to chunks and embeddings)
+	result, err := db.ExecContext(ctx, `DELETE FROM files WHERE path LIKE $1`, path+"/%")
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete files: %w", err)
+	}
+	deleted, _ := result.RowsAffected()
+
+	// Delete the index record
+	_, err = db.ExecContext(ctx, `DELETE FROM indexes WHERE path = $1`, path)
+	if err != nil {
+		return deleted, fmt.Errorf("failed to delete index: %w", err)
+	}
+
+	return deleted, nil
+}
+
 // Helper functions
 
 // convertInt64ArrayToIntSlice converts pq.Int64Array to []int

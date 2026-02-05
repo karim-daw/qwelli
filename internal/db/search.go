@@ -62,16 +62,22 @@ func (db *DB) RebuildHNSWIndex(ctx context.Context) error {
 
 // SearchANN performs approximate nearest neighbor search
 func (db *DB) SearchANN(ctx context.Context, query []float32, k int) ([]SearchResult, error) {
-	return db.SearchANNWithFilter(ctx, query, k, "")
+	return db.SearchANNWithPathFilter(ctx, query, k, "", "")
 }
 
 // SearchANNWithFilter performs ANN search with optional content type filtering
 // contentType can be "text", "image", or "" (empty string) for all types
 func (db *DB) SearchANNWithFilter(ctx context.Context, query []float32, k int, contentType string) ([]SearchResult, error) {
-	// When filtering by content type, fetch more candidates to ensure we get enough results
-	// after filtering. Use a multiplier to account for the distribution of content types.
+	return db.SearchANNWithPathFilter(ctx, query, k, contentType, "")
+}
+
+// SearchANNWithPathFilter performs ANN search with optional content type and path prefix filtering
+// contentType can be "text", "image", or "" (empty string) for all types
+// pathPrefix filters results to only include files whose path starts with the given prefix (or "" for all)
+func (db *DB) SearchANNWithPathFilter(ctx context.Context, query []float32, k int, contentType string, pathPrefix string) ([]SearchResult, error) {
+	// When filtering, fetch more candidates to ensure we get enough results
 	candidateLimit := k
-	if contentType != "" {
+	if contentType != "" || pathPrefix != "" {
 		// Fetch 3x more candidates when filtering to ensure we get enough results
 		candidateLimit = k * 3
 		if candidateLimit < 50 {
@@ -82,55 +88,55 @@ func (db *DB) SearchANNWithFilter(ctx context.Context, query []float32, k int, c
 		}
 	}
 
-	// Build query with optional content type filter
-	var query_sql string
+	// Build query with optional filters
 	var rows *sql.Rows
 	var err error
 
 	queryVec := pgvector.NewVector(query)
 
-	if contentType != "" {
-		// Query with content type filter
-		query_sql = `
-			SELECT
-				c.chunk_id,
-				c.file_path,
-				c.file_type,
-				c.content,
-				c.chunk_index,
-				c.total_chunks,
-				c.page_numbers,
-				c.content_type,
-				c.image_data,
-				(e.embedding <=> $1) AS distance
-			FROM embeddings e
-			JOIN chunks c ON e.chunk_id = c.chunk_id
-			WHERE c.content_type = $2
-			ORDER BY distance ASC
-			LIMIT $3`
+	// Build WHERE clauses and arguments dynamically
+	whereClause := ""
+	args := []interface{}{queryVec}
+	argNum := 2
 
-		rows, err = db.QueryContext(ctx, query_sql, queryVec, contentType, candidateLimit)
-	} else {
-		// Query without filter
-		query_sql = `
-			SELECT
-				c.chunk_id,
-				c.file_path,
-				c.file_type,
-				c.content,
-				c.chunk_index,
-				c.total_chunks,
-				c.page_numbers,
-				c.content_type,
-				c.image_data,
-				(e.embedding <=> $1) AS distance
-			FROM embeddings e
-			JOIN chunks c ON e.chunk_id = c.chunk_id
-			ORDER BY distance ASC
-			LIMIT $2`
-
-		rows, err = db.QueryContext(ctx, query_sql, queryVec, k)
+	if contentType != "" && pathPrefix != "" {
+		// Both filters - use pathPrefix + "/%" to match files inside the folder only
+		whereClause = fmt.Sprintf("WHERE c.content_type = $%d AND c.file_path LIKE $%d", argNum, argNum+1)
+		args = append(args, contentType, pathPrefix+"/%")
+		argNum += 2
+	} else if contentType != "" {
+		// Content type filter only
+		whereClause = fmt.Sprintf("WHERE c.content_type = $%d", argNum)
+		args = append(args, contentType)
+		argNum++
+	} else if pathPrefix != "" {
+		// Path prefix filter only - use pathPrefix + "/%" to match files inside the folder only
+		whereClause = fmt.Sprintf("WHERE c.file_path LIKE $%d", argNum)
+		args = append(args, pathPrefix+"/%")
+		argNum++
 	}
+
+	args = append(args, candidateLimit)
+
+	query_sql := fmt.Sprintf(`
+		SELECT
+			c.chunk_id,
+			c.file_path,
+			c.file_type,
+			c.content,
+			c.chunk_index,
+			c.total_chunks,
+			c.page_numbers,
+			c.content_type,
+			c.image_data,
+			(e.embedding <=> $1) AS distance
+		FROM embeddings e
+		JOIN chunks c ON e.chunk_id = c.chunk_id
+		%s
+		ORDER BY distance ASC
+		LIMIT $%d`, whereClause, argNum)
+
+	rows, err = db.QueryContext(ctx, query_sql, args...)
 
 	if err != nil {
 		return nil, fmt.Errorf("ANN search failed: %w", err)

@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -12,41 +11,49 @@ import (
 // SearchFTS performs full-text search using keyword matching with relevance scoring
 // Uses PostgreSQL's ILIKE for case-insensitive pattern matching with TF-IDF-like scoring
 func (db *DB) SearchFTS(ctx context.Context, query string, k int, contentType string) ([]SearchResult, error) {
+	return db.SearchFTSWithPathFilter(ctx, query, k, contentType, "")
+}
+
+// SearchFTSWithPathFilter performs full-text search with optional path prefix filtering
+func (db *DB) SearchFTSWithPathFilter(ctx context.Context, query string, k int, contentType string, pathPrefix string) ([]SearchResult, error) {
 	// Tokenize query into keywords (split by spaces, remove empty)
 	keywords := tokenizeQueryCommon(query)
 	if len(keywords) == 0 {
 		return []SearchResult{}, nil
 	}
 
-	// Build content type filter as WHERE condition
-	contentTypeFilter := ""
-	if contentType != "" {
-		contentTypeFilter = " AND content_type = $2"
-	}
-
 	// Build ILIKE conditions for each keyword
-	// PostgreSQL uses $N for placeholders, we'll use ILIKE for case-insensitive matching
 	likeConditions := make([]string, len(keywords))
 	for i, keyword := range keywords {
-		// Escape special characters for LIKE pattern
 		escapedKeyword := escapeLikePatternPostgres(keyword)
-		// Use ILIKE (case-insensitive LIKE)
 		likeConditions[i] = fmt.Sprintf("content ILIKE '%%%s%%'", escapedKeyword)
 	}
 
 	// Build WHERE clause combining all keywords with AND (all must match)
 	whereClause := strings.Join(likeConditions, " AND ")
-	if contentTypeFilter != "" {
-		whereClause += contentTypeFilter
+
+	// Build args list for parameterized query
+	args := []interface{}{k}
+	argNum := 2
+
+	// Add content type filter
+	if contentType != "" {
+		whereClause += fmt.Sprintf(" AND content_type = $%d", argNum)
+		args = append(args, contentType)
+		argNum++
+	}
+
+	// Add path prefix filter - use pathPrefix + "/%" to match files inside the folder only
+	if pathPrefix != "" {
+		whereClause += fmt.Sprintf(" AND file_path LIKE $%d", argNum)
+		args = append(args, pathPrefix+"/%")
+		argNum++
 	}
 
 	// Calculate relevance score using a TF-IDF-like approach
-	// Score = sum of (keyword matches * weight) for each keyword
 	scoreExpr := buildRelevanceScorePostgresSQL(keywords)
 
 	// Query with relevance scoring
-	// Convert relevance score to distance: distance = 1.0 / (1.0 + relevance_score)
-	// Higher relevance = lower distance (better match)
 	queryStr := fmt.Sprintf(`
 		WITH scored_chunks AS (
 			SELECT
@@ -79,15 +86,7 @@ func (db *DB) SearchFTS(ctx context.Context, query string, k int, contentType st
 		LIMIT $1
 	`, scoreExpr, whereClause)
 
-	var rows *sql.Rows
-	var err error
-
-	if contentType != "" {
-		rows, err = db.QueryContext(ctx, queryStr, k, contentType)
-	} else {
-		rows, err = db.QueryContext(ctx, queryStr, k)
-	}
-
+	rows, err := db.QueryContext(ctx, queryStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("FTS query failed: %w", err)
 	}
@@ -107,10 +106,8 @@ func (db *DB) SearchFTS(ctx context.Context, query string, k int, contentType st
 			return nil, fmt.Errorf("failed to scan FTS result: %w", err)
 		}
 
-		// Convert pq.Int64Array to []int
 		r.PageNumbers = convertInt64ArrayToIntSlice(pageNumbers)
 
-		// Set default content type if empty
 		if r.ContentType == "" {
 			r.ContentType = "text"
 		}

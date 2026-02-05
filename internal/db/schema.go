@@ -5,6 +5,14 @@ import "fmt"
 // buildSchema returns SQL statements to create PostgreSQL tables with pgvector
 func buildSchema(dimension int) []string {
 	return []string{
+		// Indexes table - stores indexed folders
+		`CREATE TABLE IF NOT EXISTS indexes (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name TEXT NOT NULL,
+			path TEXT NOT NULL UNIQUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
 		// Files table - metadata about indexed files
 		`CREATE TABLE IF NOT EXISTS files (
 			file_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

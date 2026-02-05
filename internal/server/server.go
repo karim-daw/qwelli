@@ -151,33 +151,47 @@ func (s *Server) handleListIndexes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With PostgreSQL, we have a single database
-	// For now, return stats for the database (we can enhance this later to support multiple "indexes" via metadata)
-	indexes := make([]IndexInfo, 0, 1)
-
-	// Get stats from database using connection string
-	count, err := s.engine.GetIndexStats(s.config.DatabaseURL)
+	// Get dimension for database connection
+	dim, err := db.GetDimension(r.Context(), s.config.DatabaseURL)
 	if err != nil {
-		count = 0
+		// Database might be empty, return empty list
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ListIndexesResponse{Indexes: []IndexInfo{}})
+		return
 	}
 
-	// Get folder path from metadata
-	folderPath, err := s.engine.GetFolderPath(s.config.DatabaseURL)
-	if err != nil || folderPath == "" {
-		folderPath = "default"
+	// Connect to database
+	projectDB, err := db.OpenProjectDB(s.config.DatabaseURL, dim)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Database connection error"})
+		return
+	}
+	defer projectDB.Close()
+
+	// Get all indexes from the indexes table
+	dbIndexes, err := projectDB.GetIndexes(r.Context())
+	if err != nil {
+		log.Printf("Failed to get indexes: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ListIndexesResponse{Indexes: []IndexInfo{}})
+		return
 	}
 
-	indexes = append(indexes, IndexInfo{
-		Name:          filepath.Base(folderPath),
-		Path:          folderPath,
-		DocumentCount: count,
-		LastModified:  time.Now().Format("2006-01-02 15:04:05"),
-	})
-
-	response := ListIndexesResponse{Indexes: indexes}
+	// Convert to API response format
+	indexes := make([]IndexInfo, 0, len(dbIndexes))
+	for _, idx := range dbIndexes {
+		indexes = append(indexes, IndexInfo{
+			Name:          idx.Name,
+			Path:          idx.Path,
+			DocumentCount: idx.DocCount,
+			LastModified:  idx.CreatedAt,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(ListIndexesResponse{Indexes: indexes})
 }
 
 type SearchResultItem struct {
@@ -237,10 +251,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// With PostgreSQL, we use the configured database URL
-	// indexPath is ignored for now (can be used later for filtering within database)
+	// indexPath is used to filter results to only include files from the selected index folder
 	dbPath := s.config.DatabaseURL
 
-	// Generate cache key
+	// Generate cache key (includes indexPath for per-index caching)
 	cacheKey := s.generateCacheKey(query, indexPath, strategy, contentType, topK)
 
 	// Check cache first
@@ -256,10 +270,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🔍 Cache miss, performing search for: %s", query)
+	log.Printf("🔍 Cache miss, performing search for: %s (index: %s)", query, indexPath)
 
-	// Perform search using the engine
-	engineResults, err := s.engine.SearchWithStrategy(query, dbPath, topK, contentType, strategy)
+	// Perform search using the engine with path filtering
+	engineResults, err := s.engine.SearchWithStrategyAndPath(query, dbPath, topK, contentType, strategy, indexPath)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1061,8 +1075,8 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	defer projectDB.Close()
 
-	// Delete all files matching the index path prefix (cascade deletes chunks and embeddings)
-	deleted, err := projectDB.DeleteFilesByPathPrefix(r.Context(), req.IndexPath)
+	// Delete index entry and all files matching the index path (cascade deletes chunks and embeddings)
+	deleted, err := projectDB.DeleteIndex(r.Context(), req.IndexPath)
 	if err != nil {
 		log.Printf("Failed to delete index: %v", err)
 		w.Header().Set("Content-Type", "application/json")
