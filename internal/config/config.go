@@ -36,15 +36,15 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		EmbeddingProvider: "voyage",
-		APIKey:            os.Getenv("QWELLI_EMBEDDING_KEY"),
-		Model:             os.Getenv("QWELLI_EMBEDDING_MODEL"),
-		Endpoint:          os.Getenv("QWELLI_EMBEDDING_ENDPOINT"),
+		APIKey:            os.Getenv("VOYAGE_API_KEY"),
+		Model:             os.Getenv("VOYAGE_MODEL"),
+		Endpoint:          os.Getenv("VOYAGE_EMBEDDING_ENDPOINT"),
 		EnableMultimodal:  true, // Default to true for Voyage
 		ImageQuality:      "medium",
 		EnableReranker:    true, // Default to true (enabled by default)
 		RerankProvider:    "voyage",
-		RerankModel:       os.Getenv("QWELLI_RERANK_MODEL"),
-		RerankEndpoint:    os.Getenv("QWELLI_RERANK_ENDPOINT"),
+		RerankModel:       os.Getenv("VOYAGE_RERANK_MODEL"),
+		RerankEndpoint:    os.Getenv("VOYAGE_RERANK_ENDPOINT"),
 		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
@@ -55,7 +55,7 @@ func ConfigPath() string {
 	return filepath.Join(homeDir, ".qwelli", "config.yaml")
 }
 
-// Load loads the configuration from disk
+// Load loads the configuration from disk and applies environment variable overrides
 func Load() (*Config, error) {
 	configPath := ConfigPath()
 
@@ -72,6 +72,26 @@ func Load() (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Apply environment variable overrides (env vars take precedence over config file)
+	if apiKey := os.Getenv("VOYAGE_API_KEY"); apiKey != "" {
+		cfg.APIKey = apiKey
+	}
+	if model := os.Getenv("VOYAGE_MODEL"); model != "" {
+		cfg.Model = model
+	}
+	if endpoint := os.Getenv("VOYAGE_EMBEDDING_ENDPOINT"); endpoint != "" {
+		cfg.Endpoint = endpoint
+	}
+	if rerankModel := os.Getenv("VOYAGE_RERANK_MODEL"); rerankModel != "" {
+		cfg.RerankModel = rerankModel
+	}
+	if rerankEndpoint := os.Getenv("VOYAGE_RERANK_ENDPOINT"); rerankEndpoint != "" {
+		cfg.RerankEndpoint = rerankEndpoint
+	}
+	if val := os.Getenv("ENABLE_RERANKER"); val != "" {
+		cfg.EnableReranker = val == "true" || val == "1" || val == "yes"
 	}
 
 	return &cfg, nil

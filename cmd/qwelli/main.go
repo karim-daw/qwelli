@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/karim-daw/qwelli/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -11,6 +12,8 @@ import (
 var version = "0.1.0"
 
 func main() {
+	// Load .env file if present (ignore errors if not found)
+	_ = godotenv.Load()
 	// If no arguments provided (double-click scenario), default to serve
 	if len(os.Args) == 1 {
 		if err := cli.RunServeDefault(); err != nil {
