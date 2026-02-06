@@ -8,155 +8,95 @@ import (
 	"strings"
 	"time"
 
-	"github.com/karim-daw/qwelli/internal/config"
-	"github.com/karim-daw/qwelli/internal/engine"
-	"github.com/karim-daw/qwelli/internal/voyage"
+	"github.com/karim-daw/qwelli/internal/service"
 	"github.com/spf13/cobra"
 )
 
 func NewIndexCmd() *cobra.Command {
-	var incremental bool
-	var multimodal bool
+	var incremental, multimodal bool
 
 	cmd := &cobra.Command{
 		Use:   "index <folder>",
 		Short: "Index a folder for semantic search",
-		Long:  "Recursively index all files in a folder and generate embeddings",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIndex(args[0], incremental, multimodal)
 		},
 	}
-
 	cmd.Flags().BoolVarP(&incremental, "incremental", "i", false, "Only index new or changed files")
-	cmd.Flags().BoolVarP(&multimodal, "multimodal", "m", false, "Enable multimodal indexing (extract and index images from PDFs)")
-
+	cmd.Flags().BoolVarP(&multimodal, "multimodal", "m", false, "Enable multimodal indexing")
 	return cmd
 }
 
-func runIndex(folderPath string, incremental bool, multimodal bool) error {
-
-	// Resolve to absolute path
-	absPath, err := filepath.Abs(folderPath)
+func runIndex(folderPath string, incremental, multimodal bool) error {
+	svc, err := service.Load()
 	if err != nil {
-		return fmt.Errorf("invalid folder path: %w", err)
+		return err
 	}
-
-	// Check if folder exists
-	if _, err := filepath.Abs(absPath); err != nil {
-		return fmt.Errorf("folder does not exist: %s", absPath)
-	}
-
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("%w", err)
-	}
-
-	// Ensure index directory exists
-	if err := cfg.EnsureIndexDir(); err != nil {
+	if err := svc.Config().EnsureIndexDir(); err != nil {
 		return err
 	}
 
-	// Generate database name from folder path
-	dbName := generateDBName(absPath)
-	dbPath := filepath.Join(cfg.IndexDir, dbName)
-
-	fmt.Printf("📂 Indexing folder: %s\n", absPath)
-
-	// Check if folder exists
+	absPath, err := filepath.Abs(folderPath)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		return fmt.Errorf("folder does not exist: %s", absPath)
 	}
 
-	fmt.Printf("💾 Database: %s\n\n", dbPath)
-
-	// Use Voyage provider
-	enableMultimodal := multimodal || cfg.EnableMultimodal
-
-	// Create voyage client
-	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
-	})
+	dbPath, err := svc.GenerateDBPath(absPath)
 	if err != nil {
-		return fmt.Errorf("failed to create voyage client: %w", err)
+		return err
 	}
 
-	// Create engine with voyage client
-	eng := engine.NewEngine(voyageClient, enableMultimodal)
+	fmt.Printf("📂 Indexing folder: %s\n", absPath)
+	fmt.Printf("💾 Database: %s\n\n", dbPath)
 
+	enableMultimodal := multimodal || svc.Config().EnableMultimodal
 	if enableMultimodal {
-		fmt.Printf("🖼️  Multimodal indexing enabled (text + images)\n")
+		fmt.Println("🖼️  Multimodal indexing enabled")
 	}
 
 	// If incremental, show status first
 	if incremental {
-		// Check if database exists
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-			fmt.Println("⚠️  Database not found. Performing full index instead of incremental.")
+			fmt.Println("⚠️  Database not found. Performing full index instead.")
 			incremental = false
 		} else {
-			status, err := eng.GetIndexStatus(dbPath, absPath)
+			status, err := svc.GetIndexStatus(absPath)
 			if err != nil {
-				return fmt.Errorf("failed to get index status: %w", err)
+				return fmt.Errorf("get index status: %w", err)
 			}
-
 			if len(status.ToAdd) == 0 && len(status.ToUpdate) == 0 && len(status.ToDelete) == 0 {
-				fmt.Println("✓ Index is already up to date. No changes detected.")
+				fmt.Println("✓ Index is already up to date.")
 				return nil
 			}
-
-			// Show summary
-			fmt.Printf("📊 Detected changes: %d to add, %d to update, %d to delete\n\n",
+			fmt.Printf("📊 Changes: %d to add, %d to update, %d to delete\n\n",
 				len(status.ToAdd), len(status.ToUpdate), len(status.ToDelete))
 		}
 	}
 
-	// Index with progress
 	start := time.Now()
 	var lastProgress string
+	opts := service.IndexOptions{Incremental: incremental, Multimodal: enableMultimodal}
 
-	var textChunks, imageChunks int
-	err = eng.IndexFolder(context.Background(), absPath, dbPath, incremental, func(current, total int, filename string) {
+	indexFn := svc.CreateIndex
+	if incremental {
+		indexFn = svc.UpdateIndex
+	}
+
+	err = indexFn(context.Background(), absPath, opts, func(current, total int, filename string) {
 		progress := fmt.Sprintf("📄 Processing %d/%d: %s", current, total, filepath.Base(filename))
-		if enableMultimodal {
-			progress += fmt.Sprintf(" (text: %d, images: %d)", textChunks, imageChunks)
-		}
-
-		// Clear previous line and print new progress
-		fmt.Print("\r" + strings.Repeat(" ", len(lastProgress)) + "\r")
-		fmt.Print(progress)
+		fmt.Print("\r" + strings.Repeat(" ", len(lastProgress)) + "\r" + progress)
 		lastProgress = progress
 	})
-
-	// Clear progress line
 	fmt.Print("\r" + strings.Repeat(" ", len(lastProgress)) + "\r")
-
 	if err != nil {
 		return fmt.Errorf("indexing failed: %w", err)
 	}
 
-	elapsed := time.Since(start)
-	fmt.Printf("✅ Total indexing time: %v (includes file processing, embedding generation, and HNSW index rebuild)\n", elapsed)
-	fmt.Printf("🔍 You can now search with: qwelli search \"your query\" --index %s\n", absPath)
-
+	fmt.Printf("✅ Indexed in %v\n", time.Since(start))
+	fmt.Printf("🔍 Search with: qwelli search \"your query\" --index %s\n", absPath)
 	return nil
-}
-
-// generateDBName creates a safe database filename from a folder path
-func generateDBName(folderPath string) string {
-	// Use the folder name + hash for uniqueness
-	base := filepath.Base(folderPath)
-
-	// Clean the name to be filesystem-safe
-	safe := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
-		}
-		return '_'
-	}, base)
-
-	return safe + ".db"
 }

@@ -2,28 +2,20 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
-	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/engine"
-	"github.com/karim-daw/qwelli/internal/voyage"
+	"github.com/karim-daw/qwelli/internal/service"
 )
 
-// runSearchShell is a wrapper for runSearch that handles shell-specific setup
+// runSearchShell performs a search from the interactive shell.
 func runSearchShell(query, indexPath string, topK int, textOnly, imagesOnly bool, strategy string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	dbPath := filepath.Join(cfg.IndexDir, generateDBName(indexPath))
-	return searchResults(query, dbPath, topK, textOnly, imagesOnly, strategy, cfg)
+	return executeSearch(query, indexPath, topK, textOnly, imagesOnly, strategy, false)
 }
 
-// searchResults performs the actual search and displays results (shared between CLI and shell)
-func searchResults(query, dbPath string, topK int, textOnly, imagesOnly bool, strategy string, cfg *config.Config) error {
-	// Determine content type filter
+// displaySearchResults performs a search and prints results.
+// Shared between CLI search and interactive shell.
+func displaySearchResults(svc *service.Service, dbPath, query string, topK int, textOnly, imagesOnly bool, strategy string) error {
 	contentType := ""
 	if textOnly && imagesOnly {
 		return fmt.Errorf("cannot use both --text-only and --images-only")
@@ -33,105 +25,86 @@ func searchResults(query, dbPath string, topK int, textOnly, imagesOnly bool, st
 		contentType = "image"
 	}
 
-	// Create voyage client and engine
-	voyageClient, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create voyage client: %w", err)
-	}
-
-	eng := engine.NewEngine(voyageClient, cfg.EnableMultimodal)
-
-	// Use SearchWithStrategy to support different search methods
-	results, err := eng.SearchWithStrategy(query, dbPath, topK, contentType, strategy)
+	results, err := svc.SearchByDBPath(dbPath, query, topK, contentType, strategy)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
-
 	if len(results) == 0 {
 		fmt.Println("No results found.")
 		return nil
 	}
 
-	// Display results (same format as search.go)
-	for i, result := range results {
-		fmt.Printf("Result %d:\n", i+1)
-
-		// Display content type
-		contentType := "text"
-		if ct, ok := result.TextMetadata["content_type"].(string); ok && ct != "" {
-			contentType = ct
-		}
-		if contentType == "image" {
-			fmt.Printf("  🖼️  Type: Image\n")
-		} else {
-			fmt.Printf("  📄 Type: Text\n")
-		}
-
-		fmt.Printf("  📄 File: %s\n", result.FileName)
-
-		// Display page numbers if available (PDFs)
-		if pageNumbers, ok := result.TextMetadata["page_numbers"]; ok {
-			var pages []string
-			switch v := pageNumbers.(type) {
-			case []int:
-				for _, p := range v {
-					pages = append(pages, fmt.Sprintf("%d", p))
-				}
-			case []interface{}:
-				for _, p := range v {
-					pages = append(pages, fmt.Sprintf("%v", p))
-				}
-			}
-			if len(pages) > 0 {
-				fmt.Printf("  📖 Page(s): %s\n", strings.Join(pages, ", "))
-			}
-		}
-
-		// Display chunk info if available
-		if chunkIdx, ok := result.TextMetadata["chunk_index"]; ok {
-			var idx int
-			switch v := chunkIdx.(type) {
-			case int:
-				idx = v
-			case float64:
-				idx = int(v)
-			}
-			if totalChunks, ok := result.TextMetadata["total_chunks"]; ok {
-				var total int
-				switch v := totalChunks.(type) {
-				case int:
-					total = v
-				case float64:
-					total = int(v)
-				}
-				fmt.Printf("  🧩 Chunk: %d of %d\n", idx+1, total)
-			}
-		}
-
-		fmt.Printf("  📁 Path: %s\n", result.FilePath)
-		fmt.Printf("  📏 Distance: %.4f\n", result.Distance)
-
-		// For images, try to save preview
-		if contentType == "image" {
-			if hasImage, ok := result.TextMetadata["has_image"].(bool); ok && hasImage {
-				fmt.Printf("  🖼️  Image content (base64 data available)\n")
-			}
-		} else {
-			fmt.Printf("  📝 Preview: %s\n", truncate(result.Content, 500))
-		}
-		fmt.Println()
+	for i, r := range results {
+		printResult(i+1, r)
 	}
-
 	return nil
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+func printResult(num int, r engine.SearchResult) {
+	ct := "text"
+	if v, ok := r.TextMetadata["content_type"].(string); ok && v != "" {
+		ct = v
+	}
+
+	fmt.Printf("Result %d:\n", num)
+	if ct == "image" {
+		fmt.Println("  🖼️  Type: Image")
+	} else {
+		fmt.Println("  📄 Type: Text")
+	}
+	fmt.Printf("  📄 File: %s\n", r.FileName)
+
+	// Page numbers
+	if pn, ok := r.TextMetadata["page_numbers"]; ok {
+		var pages []string
+		switch v := pn.(type) {
+		case []int:
+			for _, p := range v {
+				pages = append(pages, fmt.Sprintf("%d", p))
+			}
+		case []interface{}:
+			for _, p := range v {
+				pages = append(pages, fmt.Sprintf("%v", p))
+			}
+		}
+		if len(pages) > 0 {
+			fmt.Printf("  📖 Page(s): %s\n", strings.Join(pages, ", "))
+		}
+	}
+
+	// Chunk info
+	if idx, ok := asInt(r.TextMetadata["chunk_index"]); ok {
+		if total, ok := asInt(r.TextMetadata["total_chunks"]); ok {
+			fmt.Printf("  🧩 Chunk: %d of %d\n", idx+1, total)
+		}
+	}
+
+	fmt.Printf("  📁 Path: %s\n", r.FilePath)
+	fmt.Printf("  📏 Distance: %.4f\n", r.Distance)
+
+	if ct == "image" {
+		if has, ok := r.TextMetadata["has_image"].(bool); ok && has {
+			fmt.Println("  🖼️  Image content (base64 data available)")
+		}
+	} else {
+		fmt.Printf("  📝 Preview: %s\n", truncate(r.Content, 500))
+	}
+	fmt.Println()
+}
+
+func asInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return s[:max] + "..."
 }

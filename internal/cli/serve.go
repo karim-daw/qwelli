@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/server"
+	"github.com/karim-daw/qwelli/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -34,12 +34,12 @@ func RunServeDefault() error {
 }
 
 func runServe(port int, openBrowser bool) error {
-	cfg, err := config.Load()
+	svc, err := service.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w\nRun 'qwelli init' first", err)
 	}
 
-	srv := server.NewServer(cfg, port)
+	srv := server.NewServer(svc, port)
 
 	// If we should open browser, start server in goroutine and open browser
 	if openBrowser {
