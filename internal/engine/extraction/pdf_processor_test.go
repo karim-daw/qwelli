@@ -116,13 +116,20 @@ func TestExtractText_WithSamplePDF(t *testing.T) {
 
 	// Build paths relative to workspace root (go up 3 levels from internal/engine/extraction/)
 	// internal/engine/extraction -> engine -> internal -> qwelli (workspace root)
+	// Try both old location (tests/demo) and new location (testdata)
 	possiblePaths := []string{
-		// From workspace root (3 levels up)
-		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
+		// New testdata location
+		filepath.Join(wd, "..", "..", "..", "testdata", "pdf_samples", "sample.pdf"),
+		filepath.Join(wd, "..", "..", "..", "testdata", "pdf_samples", "simple.pdf"),
+		filepath.Join(wd, "..", "..", "..", "testdata", "pdf_samples", "BillFile5086630.pdf"),
+		filepath.Join("..", "..", "..", "testdata", "pdf_samples", "sample.pdf"),
+		filepath.Join("..", "..", "..", "testdata", "pdf_samples", "simple.pdf"),
+		filepath.Join("..", "..", "..", "testdata", "pdf_samples", "BillFile5086630.pdf"),
+		// Old location (for backwards compatibility)
 		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
-		// Relative from current dir
-		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
+		filepath.Join(wd, "..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
 		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "simple.pdf"),
+		filepath.Join("..", "..", "..", "tests", "demo", "pdf_samples", "BillFile5086630.pdf"),
 	}
 
 	var path string

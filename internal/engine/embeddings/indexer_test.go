@@ -44,35 +44,52 @@ func TestNewEmbedder_Validation(t *testing.T) {
 
 func TestEmbedder_RealAPI(t *testing.T) {
 	// Try loading .env file from project root
-	// Try multiple possible paths
-	envPaths := []string{"../../.env", "../../../.env", ".env"}
+	// Try multiple possible paths (from internal/engine/embeddings/)
+	envPaths := []string{"../../../.env", "../../../../.env", ".env"}
 	var envLoaded bool
+	var loadedPath string
 	for _, path := range envPaths {
 		if err := godotenv.Load(path); err == nil {
 			envLoaded = true
+			loadedPath = path
 			break
 		}
 	}
-	if !envLoaded {
+	if envLoaded {
+		t.Logf("Loaded .env file from: %s", loadedPath)
+	} else {
 		t.Logf("Note: Could not load .env file from any of: %v (will use environment variables if set)", envPaths)
 	}
 
-	apiKey := os.Getenv("QWELLI_EMBEDDING_KEY")
-	model := os.Getenv("QWELLI_EMBEDDING_MODEL")
-	endpoint := os.Getenv("QWELLI_EMBEDDING_ENDPOINT")
+	// Use the same environment variable names as the config package
+	// These match what's in the .env file: VOYAGE_API_KEY, VOYAGE_MODEL, VOYAGE_EMBEDDING_ENDPOINT
+	apiKey := os.Getenv("VOYAGE_API_KEY")
+	model := os.Getenv("VOYAGE_MODEL")
+	endpoint := os.Getenv("VOYAGE_EMBEDDING_ENDPOINT")
+
+	// Also check for QWELLI_ prefixed versions for backwards compatibility
+	if apiKey == "" {
+		apiKey = os.Getenv("QWELLI_EMBEDDING_KEY")
+	}
+	if model == "" {
+		model = os.Getenv("QWELLI_EMBEDDING_MODEL")
+	}
+	if endpoint == "" {
+		endpoint = os.Getenv("QWELLI_EMBEDDING_ENDPOINT")
+	}
 
 	if apiKey == "" || model == "" || endpoint == "" {
 		var missing []string
 		if apiKey == "" {
-			missing = append(missing, "QWELLI_EMBEDDING_KEY")
+			missing = append(missing, "VOYAGE_API_KEY (or QWELLI_EMBEDDING_KEY)")
 		}
 		if model == "" {
-			missing = append(missing, "QWELLI_EMBEDDING_MODEL")
+			missing = append(missing, "VOYAGE_MODEL (or QWELLI_EMBEDDING_MODEL)")
 		}
 		if endpoint == "" {
-			missing = append(missing, "QWELLI_EMBEDDING_ENDPOINT")
+			missing = append(missing, "VOYAGE_EMBEDDING_ENDPOINT (or QWELLI_EMBEDDING_ENDPOINT)")
 		}
-		t.Fatalf("Missing required environment variables for real API tests: %v. Set these in your .env file (uncommented) or environment.", missing)
+		t.Skipf("Skipping real API test: missing required environment variables: %v. Set these in your .env file (uncommented) or environment to run integration tests.", missing)
 	}
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
