@@ -1,0 +1,199 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/karim-daw/qwelli/internal/db"
+	"github.com/karim-daw/qwelli/internal/engine"
+	"github.com/karim-daw/qwelli/internal/engine/differ"
+)
+
+// IndexInfo represents metadata about an indexed folder.
+type IndexInfo struct {
+	FolderPath    string
+	DBPath        string
+	DocumentCount int
+	SizeBytes     int64
+	LastModified  time.Time
+}
+
+// IndexOptions contains options for indexing operations.
+type IndexOptions struct {
+	Incremental bool
+	Multimodal  bool
+}
+
+// CreateIndex indexes a folder from scratch.
+func (s *Service) CreateIndex(ctx context.Context, folderPath string, opts IndexOptions, progressCb func(int, int, string), phaseCb ...engine.PhaseCallback) error {
+	return s.indexFolder(ctx, folderPath, false, progressCb, phaseCb...)
+}
+
+// UpdateIndex performs an incremental re-index.
+func (s *Service) UpdateIndex(ctx context.Context, folderPath string, opts IndexOptions, progressCb func(int, int, string), phaseCb ...engine.PhaseCallback) error {
+	return s.indexFolder(ctx, folderPath, true, progressCb, phaseCb...)
+}
+
+func (s *Service) indexFolder(ctx context.Context, folderPath string, incremental bool, progressCb func(int, int, string), phaseCb ...engine.PhaseCallback) error {
+	absPath, err := filepath.Abs(folderPath)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		return fmt.Errorf("folder does not exist: %s", absPath)
+	}
+
+	dbPath, err := s.GenerateDBPath(absPath)
+	if err != nil {
+		return err
+	}
+
+	if incremental {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			return fmt.Errorf("index not found for %s — create index first", absPath)
+		}
+	}
+
+	// Detect dimension & handle model changes
+	dimension, err := s.engine.DetectDimension()
+	if err != nil {
+		return err
+	}
+	s.handleModelChange(dbPath, dimension)
+
+	projectDB, err := db.OpenProjectDB(dbPath, dimension)
+	if err != nil {
+		return err
+	}
+	defer projectDB.Close()
+
+	projectDB.SetMetadata("dimension", fmt.Sprintf("%d", dimension))
+	projectDB.SetMetadata("model", s.engine.EmbeddingModel())
+	projectDB.SetMetadata("folder_path", absPath)
+
+	var phase engine.PhaseCallback
+	if len(phaseCb) > 0 {
+		phase = phaseCb[0]
+	}
+	return s.engine.IndexFolder(ctx, projectDB, absPath, incremental, progressCb, phase)
+}
+
+// handleModelChange checks if the embedding model changed and recreates the DB if needed.
+func (s *Service) handleModelChange(dbPath string, dimension int) {
+	currentModel := s.engine.EmbeddingModel()
+	if dim, err := db.GetDimensionFromDB(dbPath); err == nil {
+		if tmpDB, _ := db.OpenProjectDB(dbPath, dim); tmpDB != nil {
+			stored, _ := tmpDB.GetMetadata("model")
+			tmpDB.Close()
+			if stored != "" && stored != currentModel {
+				fmt.Printf("⚠️  Model changed from '%s' to '%s' — recreating database...\n", stored, currentModel)
+				os.Remove(dbPath)
+			}
+		}
+	}
+}
+
+// DeleteIndex removes the database file for a folder.
+func (s *Service) DeleteIndex(folderPath string) error {
+	dbPath, err := s.GenerateDBPath(folderPath)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return fmt.Errorf("index not found for %s", folderPath)
+	}
+	return os.Remove(dbPath)
+}
+
+// Search performs a search across an indexed folder.
+func (s *Service) Search(folderPath, query string, topK int, contentType, strategy string) ([]engine.SearchResult, error) {
+	projectDB, err := s.OpenDB(folderPath)
+	if err != nil {
+		return nil, err
+	}
+	defer projectDB.Close()
+	return s.engine.Search(projectDB, query, topK, contentType, strategy)
+}
+
+// SearchByDBPath performs a search using a direct DB path (used by server).
+func (s *Service) SearchByDBPath(dbPath, query string, topK int, contentType, strategy string) ([]engine.SearchResult, error) {
+	dim, err := db.GetDimensionFromDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	projectDB, err := db.OpenProjectDB(dbPath, dim)
+	if err != nil {
+		return nil, err
+	}
+	defer projectDB.Close()
+	return s.engine.Search(projectDB, query, topK, contentType, strategy)
+}
+
+// GetIndexStatus returns pending changes for an indexed folder.
+func (s *Service) GetIndexStatus(folderPath string) (*differ.IndexStatus, error) {
+	absPath, err := filepath.Abs(folderPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	projectDB, err := s.OpenDB(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer projectDB.Close()
+	return s.engine.GetIndexStatus(projectDB, absPath)
+}
+
+// GetIndexStats returns the number of indexed chunks for a folder.
+func (s *Service) GetIndexStats(folderPath string) (int, error) {
+	projectDB, err := s.OpenDB(folderPath)
+	if err != nil {
+		return 0, err
+	}
+	defer projectDB.Close()
+	return projectDB.CountChunks()
+}
+
+// ListIndexes returns metadata for all indexed folders.
+func (s *Service) ListIndexes() ([]IndexInfo, error) {
+	files, err := filepath.Glob(filepath.Join(s.config.IndexDir, "*.db"))
+	if err != nil {
+		return nil, fmt.Errorf("list indexes: %w", err)
+	}
+
+	indexes := make([]IndexInfo, 0, len(files))
+	for _, dbFile := range files {
+		dim, err := db.GetDimensionFromDB(dbFile)
+		if err != nil {
+			continue
+		}
+		pdb, err := db.OpenProjectDB(dbFile, dim)
+		if err != nil {
+			continue
+		}
+
+		count, _ := pdb.CountChunks()
+		folder, _ := pdb.GetMetadata("folder_path")
+		pdb.Close()
+
+		if folder == "" {
+			folder = strings.TrimSuffix(filepath.Base(dbFile), ".db")
+		}
+
+		var size int64
+		var modTime time.Time
+		if info, err := os.Stat(dbFile); err == nil {
+			size = info.Size()
+			modTime = info.ModTime()
+		}
+
+		indexes = append(indexes, IndexInfo{
+			FolderPath: folder, DBPath: dbFile,
+			DocumentCount: count, SizeBytes: size, LastModified: modTime,
+		})
+	}
+	return indexes, nil
+}
