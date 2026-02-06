@@ -112,7 +112,6 @@ function App() {
     );
     const [showFullTextModal, setShowFullTextModal] = useState(false);
     const [cacheStatus, setCacheStatus] = useState<string | null>(null);
-    // this is a comment
     // Search settings
     const [strategy, setStrategy] = useState("semantic");
     const [topK, setTopK] = useState(10);
@@ -385,7 +384,6 @@ function App() {
         if (!newIndexPath.trim()) return;
 
         setIndexing(true);
-        // const convertedPath = convertWindowsPathToWSL(newIndexPath.trim());
 
         try {
             // Connect to SSE progress stream
