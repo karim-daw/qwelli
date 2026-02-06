@@ -8,10 +8,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// TODO: use env vars
 const (
 	// Default endpoints
 	DefaultEmbeddingEndpoint = "https://api.voyageai.com/v1/multimodalembeddings"
@@ -170,41 +170,17 @@ func (c *Client) doRequest(ctx context.Context, httpClient *http.Client, endpoin
 	return body, nil
 }
 
-// isTimeoutError checks if an error is a timeout error
 func isTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}
-
-	// Check for context deadline exceeded
 	if err == context.DeadlineExceeded {
 		return true
 	}
-
-	// Check for http.Client timeout
 	if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
 		return true
 	}
-
-	// Check error string as fallback
-	errStr := err.Error()
-	return containsAny(errStr, []string{
-		"context deadline exceeded",
-		"Client.Timeout exceeded",
-		"timeout",
-		"timed out",
-	})
-}
-
-func containsAny(s string, substrs []string) bool {
-	for _, substr := range substrs {
-		if len(s) >= len(substr) {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	s := err.Error()
+	return strings.Contains(s, "timeout") || strings.Contains(s, "timed out") ||
+		strings.Contains(s, "context deadline exceeded")
 }

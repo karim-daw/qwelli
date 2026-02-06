@@ -1,9 +1,5 @@
 package voyage
 
-// ============================================================================
-// EMBEDDING TYPES
-// ============================================================================
-
 // MultimodalInput represents either text or image input for embedding
 type MultimodalInput struct {
 	Type        string // "text" or "image"
@@ -48,10 +44,6 @@ type embeddingResponse struct {
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
 }
-
-// ============================================================================
-// RERANK TYPES
-// ============================================================================
 
 // RerankInput represents a document to be reranked
 type RerankInput struct {
