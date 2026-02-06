@@ -2,62 +2,36 @@ package db
 
 import (
 	"fmt"
-	"log"
-	"strings"
 )
 
-// BuildHNSWIndex creates the HNSW index conditionally if embeddings exist
+// BuildHNSWIndex creates the HNSW index if embeddings exist
 func (p *ProjectDB) BuildHNSWIndex() error {
-	// Check if embeddings table has any rows
 	var count int
-	err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check embeddings count: %w", err)
+	if err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count); err != nil {
+		return fmt.Errorf("check embeddings: %w", err)
 	}
-
-	// Only create index if embeddings exist
 	if count == 0 {
 		return nil
 	}
-
-	_, err = p.conn.Exec(`
-		CREATE INDEX IF NOT EXISTS hnsw_idx
-		ON embeddings USING HNSW (vector)
-		WITH (metric = 'cosine')
-	`)
+	_, err := p.conn.Exec(`CREATE INDEX IF NOT EXISTS hnsw_idx ON embeddings USING HNSW (vector) WITH (metric = 'cosine')`)
 	return err
 }
 
-// RebuildHNSWIndex drops and recreates the HNSW index (required after embedding changes)
+// RebuildHNSWIndex drops and recreates the HNSW index
 func (p *ProjectDB) RebuildHNSWIndex() error {
-	// Drop existing index (if exists)
-	_, err := p.conn.Exec("DROP INDEX IF EXISTS hnsw_idx")
-	if err != nil {
-		return fmt.Errorf("failed to drop HNSW index: %w", err)
+	if _, err := p.conn.Exec("DROP INDEX IF EXISTS hnsw_idx"); err != nil {
+		return fmt.Errorf("drop HNSW index: %w", err)
 	}
-
-	// Check if embeddings exist before rebuilding
 	var count int
-	err = p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check embeddings count: %w", err)
+	if err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count); err != nil {
+		return fmt.Errorf("check embeddings: %w", err)
 	}
-
-	// Only rebuild if embeddings exist
 	if count == 0 {
 		return nil
 	}
-
-	// Rebuild from current embeddings
-	_, err = p.conn.Exec(`
-		CREATE INDEX hnsw_idx ON embeddings
-		USING HNSW(vector)
-		WITH (metric='cosine')
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create HNSW index: %w", err)
+	if _, err := p.conn.Exec(`CREATE INDEX hnsw_idx ON embeddings USING HNSW(vector) WITH (metric='cosine')`); err != nil {
+		return fmt.Errorf("create HNSW index: %w", err)
 	}
-
 	return nil
 }
 
@@ -65,62 +39,53 @@ func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 	return p.SearchANNWithFilter(query, k, "")
 }
 
-// SearchANNWithFilter performs ANN search with optional content type filtering
-// contentType can be "text", "image", or "" (empty string) for all types
+// SearchANNWithFilter performs approximate nearest neighbor search with optional content type filter
 func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType string) ([]SearchResult, error) {
 	vecStr := vectorToString(query)
 
-	// Build WHERE clause for content type filtering
-	contentTypeFilter := ""
-	if contentType != "" {
-		contentTypeFilter = fmt.Sprintf(" AND c.content_type = '%s'", contentType)
-	}
-
-	// When filtering by content type, fetch more candidates to ensure we get enough results
-	// after filtering. Use a multiplier to account for the distribution of content types.
+	// Over-fetch when filtering to compensate for filtered-out results
 	candidateLimit := k
 	if contentType != "" {
-		// Fetch 3x more candidates when filtering to ensure we get enough results
-		// This is a heuristic - in practice, the distribution might vary
-		candidateLimit = k * 3
-		if candidateLimit < 50 {
-			candidateLimit = 50 // Minimum candidates to fetch
-		}
-		if candidateLimit > 1000 {
-			candidateLimit = 1000 // Maximum candidates to avoid performance issues
-		}
+		candidateLimit = Clamp(k*3, 50, 1000)
 	}
 
-	// Optimized CTE query: avoid double distance calculation
-	// Join with chunks table to get denormalized fields (no second JOIN needed)
-	queryStr := fmt.Sprintf(`
-		WITH ranked_embeddings AS (
-			SELECT
-				chunk_id,
-				array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
-			FROM embeddings
-			ORDER BY distance
-			LIMIT ?
-		)
-		SELECT
-			c.chunk_id,
-			c.file_path,
-			c.file_type,
-			c.content,
-			c.chunk_index,
-			c.total_chunks,
-			c.page_numbers,
-			c.content_type,
-			c.image_data,
-			r.distance
-		FROM ranked_embeddings r
-		JOIN chunks c ON r.chunk_id = c.chunk_id
-		WHERE 1=1%s
-		ORDER BY r.distance
-		LIMIT ?
-	`, vecStr, p.Dimension, contentTypeFilter)
+	var q string
+	var args []interface{}
 
-	rows, err := p.conn.Query(queryStr, candidateLimit, k)
+	if contentType != "" {
+		q = fmt.Sprintf(`
+			WITH ranked AS (
+				SELECT chunk_id, array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
+				FROM embeddings ORDER BY distance LIMIT ?
+			)
+			SELECT c.chunk_id, c.file_path, c.file_type, c.content,
+				c.chunk_index, c.total_chunks, c.page_numbers, c.content_type, c.image_data,
+				r.distance
+			FROM ranked r JOIN chunks c ON r.chunk_id = c.chunk_id
+			WHERE c.content_type = ? ORDER BY r.distance LIMIT ?
+		`, vecStr, p.Dimension)
+		args = []interface{}{candidateLimit, contentType, k}
+	} else {
+		q = fmt.Sprintf(`
+			WITH ranked AS (
+				SELECT chunk_id, array_cosine_distance(vector, %s::FLOAT[%d]) AS distance
+				FROM embeddings ORDER BY distance LIMIT ?
+			)
+			SELECT c.chunk_id, c.file_path, c.file_type, c.content,
+				c.chunk_index, c.total_chunks, c.page_numbers, c.content_type, c.image_data,
+				r.distance
+			FROM ranked r JOIN chunks c ON r.chunk_id = c.chunk_id
+			ORDER BY r.distance LIMIT ?
+		`, vecStr, p.Dimension)
+		args = []interface{}{candidateLimit, k}
+	}
+
+	return p.querySearchResults(q, args...)
+}
+
+// querySearchResults executes a search query and scans results
+func (p *ProjectDB) querySearchResults(query string, args ...interface{}) ([]SearchResult, error) {
+	rows, err := p.conn.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -129,94 +94,18 @@ func (p *ProjectDB) SearchANNWithFilter(query []float32, k int, contentType stri
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		var pageNumbersIface interface{} // DuckDB returns arrays as []interface{}
+		var pageIface interface{}
 		var imageData []byte
-		var contentTypeStr string
-
 		if err := rows.Scan(&r.ChunkID, &r.FilePath, &r.FileType, &r.Content,
-			&r.ChunkIndex, &r.TotalChunks, &pageNumbersIface, &contentTypeStr, &imageData, &r.Distance); err != nil {
+			&r.ChunkIndex, &r.TotalChunks, &pageIface, &r.ContentType, &imageData, &r.Distance); err != nil {
 			return nil, err
 		}
-		// Parse page_numbers array
-		r.PageNumbers = parsePageNumbers(pageNumbersIface)
-		r.ContentType = contentTypeStr
+		r.PageNumbers = parsePageNumbers(pageIface)
+		r.ImageData = imageData
 		if r.ContentType == "" {
 			r.ContentType = "text"
 		}
-		r.ImageData = imageData
 		results = append(results, r)
 	}
 	return results, nil
-}
-
-// parsePageNumbers parses DuckDB array (can be []interface{} or string) into []int
-func parsePageNumbers(iface interface{}) []int {
-	if iface == nil {
-		return []int{}
-	}
-
-	// Handle []interface{} from DuckDB
-	if arr, ok := iface.([]interface{}); ok {
-		result := make([]int, 0, len(arr))
-		for _, v := range arr {
-			switch val := v.(type) {
-			case int:
-				result = append(result, val)
-			case int64:
-				result = append(result, int(val))
-			case int32:
-				result = append(result, int(val))
-			case int16:
-				result = append(result, int(val))
-			case int8:
-				result = append(result, int(val))
-			case float64:
-				result = append(result, int(val))
-			default:
-				// Log unexpected type for debugging
-				log.Printf("⚠️  parsePageNumbers: unexpected type %T for value %v", val, val)
-			}
-		}
-		return result
-	}
-
-	// Handle string format (fallback)
-	if s, ok := iface.(string); ok {
-		return parseIntArray(s)
-	}
-
-	// Debug: log if we can't parse
-	log.Printf("⚠️  parsePageNumbers: cannot parse type %T, value: %v", iface, iface)
-	return []int{}
-}
-
-// parseIntArray parses DuckDB array string format [1,2,3] into []int
-func parseIntArray(s string) []int {
-	if s == "" || s == "[]" {
-		return []int{}
-	}
-	// Remove brackets
-	s = strings.Trim(s, "[]")
-	if s == "" {
-		return []int{}
-	}
-	// Split by comma and parse
-	parts := strings.Split(s, ",")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		var val int
-		if _, err := fmt.Sscanf(part, "%d", &val); err == nil {
-			result = append(result, val)
-		}
-	}
-	return result
-}
-
-func vectorToString(v []float32) string {
-	parts := make([]string, len(v))
-	for i, f := range v {
-		parts[i] = fmt.Sprintf("%g", f)
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
 }

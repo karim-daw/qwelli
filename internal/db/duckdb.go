@@ -71,6 +71,13 @@ func (p *ProjectDB) Close() error { return p.conn.Close() }
 
 func (p *ProjectDB) Conn() *sql.DB { return p.conn }
 
+// CountChunks returns the total number of chunks in the database
+func (p *ProjectDB) CountChunks() (int, error) {
+	var count int
+	err := p.conn.QueryRow("SELECT COUNT(*) FROM chunks").Scan(&count)
+	return count, err
+}
+
 func GetDimensionFromDB(dbPath string) (int, error) {
 	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_only", dbPath))
 	if err != nil {
