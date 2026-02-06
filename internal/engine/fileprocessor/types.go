@@ -1,5 +1,19 @@
 package fileprocessor
 
+import (
+	"path/filepath"
+	"strings"
+)
+
+// GetFileTypeFromPath extracts the file type from a file path
+func GetFileTypeFromPath(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == "" {
+		return "unknown"
+	}
+	return ext[1:]
+}
+
 // SupportedTextExtensions defines all supported text file extensions
 var SupportedTextExtensions = map[string]bool{
 	"txt": true, "md": true, "go": true, "py": true, "js": true, "ts": true,

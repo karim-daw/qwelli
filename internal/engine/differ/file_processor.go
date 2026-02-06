@@ -36,7 +36,7 @@ func ScanFolder(root string) ([]string, error) {
 
 // IsTextFile returns true if the file path points to a supported file type
 func IsTextFile(path string) bool {
-	fileType := GetFileTypeFromPath(path)
+	fileType := fileprocessor.GetFileTypeFromPath(path)
 	return fileprocessor.IsSupported(fileType)
 }
 
@@ -49,13 +49,4 @@ func GenerateFileID(path string) string {
 // GenerateChunkID delegates to chunker package to avoid duplication
 func GenerateChunkID(fileID string, chunkIndex int) string {
 	return chunker.GenerateChunkID(fileID, chunkIndex)
-}
-
-// GetFileTypeFromPath extracts the file type from a file path
-func GetFileTypeFromPath(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == "" {
-		return "unknown"
-	}
-	return ext[1:]
 }
