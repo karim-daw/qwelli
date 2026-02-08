@@ -15,13 +15,29 @@ import (
 // It owns the DB lifecycle — callers never open databases directly.
 type Service struct {
 	config       *config.Config
-	voyageClient *voyage.Client
+	voyageClient voyage.ClientInterface
 	engine       *engine.Engine
 }
 
-// New creates a Service from config. This is the only constructor.
-func New(cfg *config.Config) (*Service, error) {
-	vc, err := voyage.NewClient(voyage.ClientConfig{
+// New creates a Service with an injected Voyage client.
+// This is the only constructor - dependencies must be provided.
+func New(cfg *config.Config, client voyage.ClientInterface) *Service {
+	return &Service{
+		config:       cfg,
+		voyageClient: client,
+		engine:       engine.NewEngine(client, cfg.EnableMultimodal),
+	}
+}
+
+// Load is a convenience function that handles the full workflow:
+// loads config, creates Voyage client, and returns a Service.
+func Load() (*Service, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            cfg.APIKey,
 		EmbeddingModel:    cfg.Model,
 		EmbeddingEndpoint: cfg.Endpoint,
@@ -31,27 +47,14 @@ func New(cfg *config.Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create voyage client: %w", err)
 	}
-	return &Service{
-		config:       cfg,
-		voyageClient: vc,
-		engine:       engine.NewEngine(vc, cfg.EnableMultimodal),
-	}, nil
-}
 
-// Load is a convenience that loads config and creates a Service in one call.
-// Eliminates the 2-step config.Load() + service.New() boilerplate.
-func Load() (*Service, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
+	return New(cfg, client), nil
 }
 
 // Engine returns the engine (used by server for direct engine access).
-func (s *Service) Engine() *engine.Engine     { return s.engine }
-func (s *Service) VoyageClient() *voyage.Client { return s.voyageClient }
-func (s *Service) Config() *config.Config       { return s.config }
+func (s *Service) Engine() *engine.Engine            { return s.engine }
+func (s *Service) VoyageClient() voyage.ClientInterface { return s.voyageClient }
+func (s *Service) Config() *config.Config            { return s.config }
 
 // GenerateDBPath returns the database file path for a given folder.
 func (s *Service) GenerateDBPath(folderPath string) (string, error) {
