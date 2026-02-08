@@ -55,11 +55,15 @@ func ConfigPath() string {
 	return filepath.Join(homeDir, ".qwelli", "config.yaml")
 }
 
-// Load loads the configuration from disk and applies environment variable overrides
-func Load() (*Config, error) {
+// Load loads the configuration from disk and applies environment variable overrides.
+// If path is provided, loads from that path; otherwise uses the default config path.
+func Load(path ...string) (*Config, error) {
 	configPath := ConfigPath()
+	if len(path) > 0 && path[0] != "" {
+		configPath = path[0]
+	}
 
-	// If config doesn't exist, return default
+	// If config doesn't exist, return error
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("config not found. Run 'qwelli init' first")
 	}
@@ -97,9 +101,13 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// Save saves the configuration to disk
-func (c *Config) Save() error {
+// Save saves the configuration to disk.
+// If path is provided, saves to that path; otherwise uses the default config path.
+func (c *Config) Save(path ...string) error {
 	configPath := ConfigPath()
+	if len(path) > 0 && path[0] != "" {
+		configPath = path[0]
+	}
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
