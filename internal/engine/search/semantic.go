@@ -8,11 +8,11 @@ import (
 
 // SemanticSearchStrategy performs semantic search using vector embeddings
 type SemanticSearchStrategy struct {
-	client *voyage.Client
+	client voyage.ClientInterface
 }
 
 // NewSemanticSearchStrategy creates a semantic search strategy with a Voyage client
-func NewSemanticSearchStrategy(client *voyage.Client) *SemanticSearchStrategy {
+func NewSemanticSearchStrategy(client voyage.ClientInterface) *SemanticSearchStrategy {
 	return &SemanticSearchStrategy{client: client}
 }
 
