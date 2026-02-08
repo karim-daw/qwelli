@@ -32,13 +32,13 @@ type SearchResult struct {
 // Engine contains the core business logic for indexing and search.
 // It does NOT manage database connections — callers provide *db.ProjectDB.
 type Engine struct {
-	voyageClient          *voyage.Client
+	voyageClient          voyage.ClientInterface
 	enableMultimodal      bool
 	contentTypeMode       fileprocessor.ContentTypeMode
 	fileProcessingService *fileprocessor.FileProcessingService
 }
 
-func NewEngine(voyageClient *voyage.Client, enableMultimodal bool) *Engine {
+func NewEngine(voyageClient voyage.ClientInterface, enableMultimodal bool) *Engine {
 	cfg := fileprocessor.DefaultProcessingConfig()
 	cfg.EnableMultimodal = enableMultimodal
 	return &Engine{
@@ -75,6 +75,11 @@ func (e *Engine) DetectDimension() (int, error) {
 type PhaseCallback func(phase, message string, current, total int)
 
 func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folderPath string, incremental bool, progressCb func(int, int, string), phaseCb PhaseCallback) error {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	emitPhase := func(phase, msg string, cur, tot int) {
 		if phaseCb != nil {
 			phaseCb(phase, msg, cur, tot)
@@ -88,6 +93,11 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 	}
 	if len(filesToProcess) == 0 {
 		return nil
+	}
+
+	// Check context before processing files
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Process files into chunks
@@ -135,7 +145,8 @@ func (e *Engine) resolveFiles(projectDB *db.ProjectDB, folderPath string, increm
 			return nil, false, err
 		}
 		if len(files) == 0 {
-			return nil, false, fmt.Errorf("no files found in %s", folderPath)
+			// Empty folder is not an error - just return empty list
+			return nil, false, nil
 		}
 		return files, true, nil
 	}
