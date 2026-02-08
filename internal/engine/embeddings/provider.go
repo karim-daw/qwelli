@@ -23,12 +23,12 @@ type MultimodalEmbeddingProvider interface {
 	EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, progressCallback func(current, total int)) ([][]float32, error)
 }
 
-// Embedder wraps a voyage.Client with a convenient interface
+// Embedder wraps a voyage.ClientInterface with a convenient interface
 type Embedder struct {
-	client *voyage.Client
+	client voyage.ClientInterface
 }
 
-func NewEmbedder(client *voyage.Client) (*Embedder, error) {
+func NewEmbedder(client voyage.ClientInterface) (*Embedder, error) {
 	if client == nil {
 		return nil, fmt.Errorf("voyage client is required")
 	}
