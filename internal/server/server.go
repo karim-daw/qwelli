@@ -64,6 +64,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/index/delete", s.handleDeleteIndex)
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
 	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
+	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
 
 	// Static web assets
 	distFS, err := fs.Sub(webFS, "web/dist")
@@ -74,6 +75,15 @@ func (s *Server) Start() error {
 
 	cfg := s.service.Config()
 	addr := fmt.Sprintf(":%d", s.port)
+	
+	// Broadcast server startup messages to terminal
+	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🚀 Server starting on http://localhost%s"}`, addr))
+	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"📂 Index directory: %s"}`, cfg.IndexDir))
+	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🤖 Model: %s"}`, cfg.Model))
+	if cfg.EnableReranker {
+		BroadcastTerminalOutput(`{"type":"log","level":"info","message":"🔄 Reranker: enabled"}`)
+	}
+	
 	log.Printf("🚀 Server starting on http://localhost%s", addr)
 	log.Printf("📂 Index directory: %s", cfg.IndexDir)
 	log.Printf("🤖 Model: %s", cfg.Model)

@@ -106,6 +106,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	cacheKey := fmt.Sprintf("%s|%s|%s|%s|%d", query, indexPath, strategy, contentType, topK)
 	if cached, ok := s.getCached(cacheKey); ok {
 		log.Printf("🎯 Cache hit: %s", query)
+		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🎯 Cache hit: %s (%d results)"}`, query, len(cached)))
 		w.Header().Set("X-Cache-Status", "HIT")
 		jsonOK(w, SearchResponse{Results: cached, Query: query})
 		return
@@ -113,19 +114,26 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Search via service
 	log.Printf("🔍 Searching: %s", query)
+	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🔍 Searching: \"%s\" [strategy=%s, top=%d]"}`, query, strategy, topK))
 	engineResults, err := s.service.SearchByDBPath(dbPath, query, topK, contentType, strategy)
 	if err != nil {
+		log.Printf("❌ Search failed: %v", err)
+		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"error","message":"❌ Search failed: %v"}`, err))
 		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("Search failed: %v", err))
 		return
 	}
 
 	// Apply reranking if enabled
 	if s.service.Config().EnableReranker && len(engineResults) > 0 {
+		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🔄 Reranking %d results..."}`, len(engineResults)))
 		engineResults = s.rerankResults(r.Context(), query, engineResults)
+		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"success","message":"✅ Reranking complete: %d results"}`, len(engineResults)))
 	}
 
 	results := toAPIResults(engineResults)
 	s.setCache(cacheKey, results)
+	log.Printf("✅ Search complete: %d results for \"%s\"", len(results), query)
+	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"success","message":"✅ Search complete: %d results for \"%s\""}`, len(results), query))
 	w.Header().Set("X-Cache-Status", "MISS")
 	jsonOK(w, SearchResponse{Results: results, Query: query})
 }
@@ -138,6 +146,7 @@ func (s *Server) rerankResults(ctx context.Context, query string, results []engi
 	reranked, err := s.service.VoyageClient().Rerank(ctx, query, docs)
 	if err != nil {
 		log.Printf("⚠️  Rerank failed: %v", err)
+		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"warning","message":"⚠️ Rerank failed: %v"}`, err))
 		return results
 	}
 	out := make([]engine.SearchResult, 0, len(reranked))
