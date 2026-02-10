@@ -118,16 +118,23 @@ func (g *EmbeddingGenerator) GenerateEmbeddings(ctx context.Context, chunks []db
 	return result, nil
 }
 
-// StoreChunksAndEmbeddings stores chunks and their embeddings in the database
+// StoreChunksAndEmbeddings stores chunks and their embeddings in the database using bulk Appender API.
 func StoreChunksAndEmbeddings(projectDB *db.ProjectDB, chunks []db.Chunk, embeddingMap map[int][]float32) error {
-	for i, chunk := range chunks {
-		if err := projectDB.InsertChunk(chunk); err != nil {
-			log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
-			continue
-		}
-		if emb, ok := embeddingMap[i]; ok {
-			if err := projectDB.InsertEmbedding(db.Embedding{ChunkID: chunk.ChunkID, Vector: emb}); err != nil {
-				log.Printf("⚠️  Failed to insert embedding for %s: %v", chunk.ChunkID, err)
+	if len(chunks) == 0 {
+		return nil
+	}
+	if err := projectDB.AppendChunksAndEmbeddings(chunks, embeddingMap); err != nil {
+		log.Printf("⚠️  Bulk insert failed, falling back to row-by-row: %v", err)
+		// Fallback to legacy path
+		for i, chunk := range chunks {
+			if err := projectDB.InsertChunk(chunk); err != nil {
+				log.Printf("⚠️  Failed to insert chunk %s: %v", chunk.ChunkID, err)
+				continue
+			}
+			if emb, ok := embeddingMap[i]; ok {
+				if err := projectDB.InsertEmbedding(db.Embedding{ChunkID: chunk.ChunkID, Vector: emb}); err != nil {
+					log.Printf("⚠️  Failed to insert embedding for %s: %v", chunk.ChunkID, err)
+				}
 			}
 		}
 	}
