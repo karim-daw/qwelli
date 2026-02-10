@@ -22,10 +22,25 @@ type Service struct {
 // New creates a Service with an injected Voyage client.
 // This is the only constructor - dependencies must be provided.
 func New(cfg *config.Config, client voyage.ClientInterface) *Service {
+	eng := engine.NewEngine(client, cfg.EnableMultimodal)
+
+	// Resolve worker counts — 0 means auto-detect (~90% of CPU cores)
+	fileWorkers := cfg.ParallelWorkers
+	if fileWorkers <= 0 {
+		fileWorkers = config.DefaultWorkerCount()
+	}
+	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers)
+
+	pdfWorkers := cfg.ParallelPDFWorkers
+	if pdfWorkers <= 0 {
+		pdfWorkers = config.DefaultWorkerCount()
+	}
+	eng.SetParallelPDFProcessing(cfg.EnableParallelPDF, pdfWorkers)
+
 	return &Service{
 		config:       cfg,
 		voyageClient: client,
-		engine:       engine.NewEngine(client, cfg.EnableMultimodal),
+		engine:       eng,
 	}
 }
 
