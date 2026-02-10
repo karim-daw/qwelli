@@ -7,6 +7,13 @@ import (
 	"os"
 )
 
+// ComputeSHA256FromBytes computes the SHA256 hash of in-memory bytes.
+// Use this when the file content is already loaded to avoid redundant disk reads.
+func ComputeSHA256FromBytes(data []byte) string {
+	hash := sha256.Sum256(data)
+	return fmt.Sprintf("%x", hash)
+}
+
 // ComputeSHA256 computes the SHA256 hash of a file's content
 func ComputeSHA256(filePath string) (string, error) {
 	file, err := os.Open(filePath)
