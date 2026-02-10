@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"runtime"
 	"time"
 
+	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/server"
 	"github.com/karim-daw/qwelli/internal/service"
 	"github.com/spf13/cobra"
@@ -34,30 +37,49 @@ func RunServeDefault() error {
 }
 
 func runServe(port int, openBrowser bool) error {
-	svc, err := service.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w\nRun 'qwelli init' first", err)
+	for {
+		if !config.Exists() {
+			// First-run: start setup server
+			ss := server.NewSetupServer(port)
+			if openBrowser {
+				serverErr := make(chan error, 1)
+				go func() {
+					serverErr <- ss.Start()
+				}()
+				time.Sleep(1 * time.Second)
+				openBrowserURL(fmt.Sprintf("http://localhost:%d", port))
+				if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+					return err
+				}
+				if !ss.RestartRequested() {
+					return nil
+				}
+				continue
+			}
+			return ss.Start()
+		}
+
+		svc, err := service.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w\nRun 'qwelli init' first", err)
+		}
+
+		srv := server.NewServer(svc, port)
+
+		if openBrowser {
+			serverErr := make(chan error, 1)
+			go func() {
+				serverErr <- srv.Start()
+			}()
+
+			time.Sleep(1 * time.Second)
+			openBrowserURL(fmt.Sprintf("http://localhost:%d", port))
+
+			return <-serverErr
+		}
+
+		return srv.Start()
 	}
-
-	srv := server.NewServer(svc, port)
-
-	// If we should open browser, start server in goroutine and open browser
-	if openBrowser {
-		// Start server in goroutine
-		serverErr := make(chan error, 1)
-		go func() {
-			serverErr <- srv.Start()
-		}()
-
-		// Wait a bit for server to start, then open browser
-		time.Sleep(1 * time.Second)
-		openBrowserURL(fmt.Sprintf("http://localhost:%d", port))
-
-		// Wait for server to finish (or error)
-		return <-serverErr
-	}
-
-	return srv.Start()
 }
 
 // openBrowserURL opens the specified URL in the default browser
