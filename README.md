@@ -1,287 +1,136 @@
 # Qwelli
 
-Local semantic file search using vector embeddings. Index your folders and find files by meaning, not keywords.
-
-## Prerequisites
-
-- Go 1.21+
-- Voyage AI API key
-- **Windows only:** GCC compiler (for CGO/DuckDB)
-
-## Windows Setup (GCC for CGO)
-
-DuckDB requires CGO which needs a C compiler. Install MSYS2:
-
-1. Download from https://www.msys2.org/
-2. Run installer, use default path `C:\msys64`
-3. Open MSYS2 terminal, run:
-   ```bash
-   pacman -S mingw-w64-ucrt-x86_64-gcc
-   ```
-4. Add to PATH permanently:
-   - Press `Win+R`, type `sysdm.cpl`, press Enter
-   - Advanced → Environment Variables
-   - Under "User variables", edit `Path`
-   - Add: `C:\msys64\ucrt64\bin`
-   - Click OK, restart terminal
-5. Verify:
-   ```powershell
-   gcc --version
-   ```
+Local semantic file search using vector embeddings. Index your folders and find files by meaning, not keywords. Comes with a built-in web UI.
 
 ## Quick Start
 
-### 1. Get Voyage AI API Key
+### 1. Prerequisites
 
-1. Go to https://www.voyageai.com/
-2. Sign up and create a new API key
-3. Copy it
+- Go 1.21+
+- Node.js 18+ (for building the web UI)
+- Voyage AI API key ([get one here](https://dash.voyageai.com/))
 
-### 2. Configure `.env`
-
-Create a `.env` file in the project root:
-
-```
-QWELLI_EMBEDDING_KEY=your-voyage-api-key
-QWELLI_EMBEDDING_MODEL=voyage-multimodal-3
-QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
-```
-
-### 3. Build and Run
-
-#### CLI Mode
+### 2. Build
 
 ```bash
-# Build the binary
+# Build with embedded web UI (recommended)
+./scripts/build-with-ui.sh
+
+# Or build Go binary only (if web/dist already exists)
 go build -o qwelli ./cmd/qwelli
-
-# Or use individual commands
-./qwelli init
-./qwelli index ./my-folder
-./qwelli search "query" --index ./my-folder
-
-# Run interactive shell
-./qwelli shell
 ```
 
-#### Web UI Mode
+### 3. Run
 
 ```bash
-# Build with embedded web UI
-./build-with-ui.sh  # Linux/Mac
-build-with-ui.bat   # Windows
+# Start the web UI (opens browser automatically)
+./qwelli
 
-# Start the web server
+# Or explicitly
 ./qwelli serve
-
-# Open browser to http://localhost:8080
+./qwelli serve --port 3000  # Custom port
 ```
 
-**Important:** The `shell` command requires an interactive terminal. Always use the built binary (`./qwelli`) instead of `go run` for reliable operation, especially for the interactive shell.
+On first launch, the browser opens to a setup screen where you enter your Voyage AI API key. After that, you're ready to index and search.
 
-## Usage
+## Windows Distribution
 
-### Commands
-
-#### `init`
-
-Setup configuration (API key, model).
+Build a Windows `.exe` from Linux/WSL for sharing with colleagues:
 
 ```bash
+./scripts/build-release.sh
+```
+
+This produces `qwelli-windows-amd64.zip` containing:
+- `qwelli.exe` -- double-click to launch (no console window)
+- `duckdb.dll` -- required runtime library (must stay next to the exe)
+
+The colleague extracts the zip, double-clicks `qwelli.exe`, and the browser opens. First launch shows a setup screen for the API key.
+
+> **Note:** Cross-compiling from Linux requires `gcc-mingw-w64-x86-64` (the script installs it automatically). Building natively on Windows produces a single `.exe` with DuckDB statically linked.
+
+### Building natively on Windows
+
+If building on Windows directly (single `.exe`, no DLL needed):
+
+1. Install MSYS2 from https://www.msys2.org/
+2. Run `pacman -S mingw-w64-ucrt-x86_64-gcc` in MSYS2
+3. Add `C:\msys64\ucrt64\bin` to PATH
+4. Run `scripts\build-with-ui.bat`
+
+## CLI Usage
+
+```bash
+# Setup config (API key, model)
 qwelli init
-```
 
-#### `index <folder>`
-
-Index all files in a folder.
-
-```bash
+# Index a folder
 qwelli index ~/Documents/project
-```
 
-#### `search <query>`
-
-Search indexed files.
-
-```bash
+# Search indexed files
 qwelli search "machine learning" --index ~/Documents/project
 qwelli search "api docs" -i ~/Documents/project -t 10
-```
 
-Options:
-
-- `--index, -i` - Path to indexed folder
-- `--top, -t` - Number of results (default: 5)
-
-#### `list`
-
-Show all indexed folders.
-
-```bash
+# List all indexes
 qwelli list
-```
 
-#### `status`
-
-Show index statistics.
-
-```bash
+# Show index status
 qwelli status --index ~/Documents/project
-```
 
-#### `shell`
+# Delete an index
+qwelli delete --index ~/Documents/project
 
-Interactive mode.
-
-```bash
+# Interactive shell
 qwelli shell
-```
 
-#### `serve`
-
-Start web UI server.
-
-```bash
+# Start web UI
 qwelli serve
-qwelli serve --port 3000  # Custom port
 ```
 
-Options:
+## Web UI Features
 
-- `--port, -p` - Port number (default: 8080)
+- **Semantic, keyword, and hybrid search** with strategy toggle
+- **Content type filtering** (text, images, or both)
+- **PDF preview** with page navigation
+- **Index management** -- create, sync, delete indexes from the sidebar
+- **Live terminal** showing real-time server logs
+- **Light/dark mode** toggle
+- **Resizable panels** (sidebar and terminal)
+- **Search caching** with recent search history
+- **Quit button** for graceful server shutdown from the browser
 
-### Interactive Shell
+## Search Strategies
 
-```
-qwelli> init                    # Setup config
-qwelli> index ./my-folder       # Index and set as current
-qwelli> search "query"          # Search current index
-qwelli> use ./other-folder      # Switch current index
-qwelli> list                    # Show all indexes
-qwelli> status                  # Show index stats
-qwelli> model                   # Show current model
-qwelli> model gpt-4             # Change model (requires re-index)
-qwelli> clear                   # Clear screen
-qwelli> help                    # Show all commands
-qwelli> exit                    # Exit
-```
+| Strategy | Description |
+|----------|-------------|
+| `semantic` | Vector similarity search (default) |
+| `keyword` | Full-text search with TF-IDF scoring |
+| `hybrid` | Combines both with Reciprocal Rank Fusion |
 
-### Supported File Types
+## Supported File Types
 
-Text files only: `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.yaml`, `.yml`, `.toml`, `.sh`, `.proto`, `.graphql`
+**Text:** `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.yaml`, `.yml`, `.toml`, `.sh`, `.json`, `.proto`, `.graphql`
 
-**Note:** SQL files (`.sql`) are excluded as they can be very large (database dumps) and aren't suitable for semantic search.
+**PDF:** Full text extraction with optional image extraction from pages
+
+**Images:** Image embeddings via multimodal model (from PDFs)
 
 Files >500KB and hidden files/folders are skipped.
 
-## Build
+## Configuration
 
-```bash
-# Current platform
-go build -o qwelli ./cmd/qwelli
+Config is stored at `~/.qwelli/config.yaml`. Set up via `qwelli init` (CLI) or the web UI setup screen on first launch.
 
-# Windows
-GOOS=windows GOARCH=amd64 go build -o qwelli.exe ./cmd/qwelli
+Environment variables override config file values:
 
-# Linux
-GOOS=linux GOARCH=amd64 go build -o qwelli-linux ./cmd/qwelli
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o qwelli-macos ./cmd/qwelli
-GOOS=darwin GOARCH=arm64 go build -o qwelli-macos-arm ./cmd/qwelli
-```
-
-For Windows with bundled DuckDB (no GCC required at runtime):
-
-```bash
-./build-windows.bat
-```
-
-## Testing
-
-### Unit Tests
-
-```bash
-# All tests
-go test ./...
-
-# Database tests only
-go test ./internal/db/... -v
-
-# With coverage
-go test ./... -cover
-```
-
-### Integration Tests (requires API key)
-
-```bash
-# Set .env or export variables
-go test ./internal/engine/indexer/... -v
-```
-
-### Demo
-
-```bash
-# Run end-to-end demo
-go run tests/demo/main.go
-```
-
-### Manual Testing
-
-```bash
-# Build
-go build -o qwelli ./cmd/qwelli
-
-# Initialize
-./qwelli init
-
-# Index test data
-./qwelli index tests/demo/testdata
-
-# Search
-./qwelli search "hello" --index tests/demo/testdata
-./qwelli search "machine learning" --index tests/demo/testdata
-
-# List and status
-./qwelli list
-./qwelli status --index tests/demo/testdata
-```
-
-## Embedding Providers
-
-Currently supported: **Voyage AI**
-
-### Voyage AI Models
-
-| Model                 | Dimension | Notes                      |
-| --------------------- | --------- | -------------------------- |
-| `voyage-multimodal-3` | 1024      | Multimodal (text + images) |
-| `voyage-3`            | 1024      | Text-only                  |
-
-### Custom Endpoints
-
-Default endpoint:
-
-```
-QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
-```
-
-## Project Structure
-
-```
-qwelli/
-├── cmd/qwelli/          # CLI entry point
-├── internal/
-│   ├── cli/             # Commands (init, index, search, shell)
-│   ├── config/          # Config file handling
-│   ├── db/              # DuckDB + HNSW index
-│   └── engine/          # Index & search orchestration
-│       ├── chunker/     # Content chunking strategies
-│       ├── indexer/     # Embedding providers
-│       └── processor/   # File processing (PDF, images, etc.)
-├── tests/demo/          # Demo application
-└── dist/                # Built binaries
-```
+| Variable | Description |
+|----------|-------------|
+| `VOYAGE_API_KEY` | Voyage AI API key (required) |
+| `VOYAGE_MODEL` | Embedding model (default: `voyage-multimodal-3`) |
+| `VOYAGE_EMBEDDING_ENDPOINT` | API endpoint |
+| `VOYAGE_RERANK_MODEL` | Reranker model |
+| `VOYAGE_RERANK_ENDPOINT` | Reranker endpoint |
+| `ENABLE_RERANKER` | Enable/disable reranking (`true`/`false`) |
 
 ## Data Storage
 
@@ -292,12 +141,58 @@ All data is local:
 
 Each indexed folder gets its own DuckDB database with HNSW vector index.
 
+## Embedding Models
+
+| Model | Dimension | Notes |
+|-------|-----------|-------|
+| `voyage-multimodal-3` | 1024 | Text + images (default) |
+| `voyage-3` | 1024 | Text-only |
+
+## Project Structure
+
+```
+qwelli/
+├── cmd/qwelli/          # CLI entry point
+├── internal/
+│   ├── cli/             # Commands (init, index, search, serve, shell, etc.)
+│   ├── config/          # YAML config + env var loading
+│   ├── db/              # DuckDB wrapper, HNSW index, FTS search
+│   ├── engine/          # Core business logic
+│   │   ├── chunker/     # Text chunking
+│   │   ├── differ/      # File change detection
+│   │   ├── embeddings/  # Embedding generation
+│   │   ├── extraction/  # PDF text extraction
+│   │   ├── fileprocessor/ # File type handling
+│   │   └── search/      # Search strategies (semantic, keyword, hybrid)
+│   ├── server/          # HTTP API + embedded React UI
+│   ├── service/         # Service layer (owns DB lifecycle)
+│   ├── voyage/          # Voyage AI client
+│   └── textutil/        # Text utilities
+├── web/                 # React frontend (Vite + TypeScript)
+├── scripts/             # Build scripts
+└── dist/                # Built binaries
+```
+
 ## How It Works
 
-1. **Index:** Scan folder → Generate embeddings via Voyage AI → Store in DuckDB
-2. **Search:** Embed query → HNSW approximate nearest neighbor search → Return matches
+1. **Index:** Scan folder -> chunk files -> generate embeddings via Voyage AI -> store in DuckDB with HNSW index
+2. **Search:** Embed query -> approximate nearest neighbor search -> optional reranking -> return matches
 
-One embedding model per database. Change model = re-index.
+One embedding model per database. Changing model requires re-indexing.
+
+## Testing
+
+```bash
+# All tests
+go test ./...
+
+# Specific packages
+go test ./internal/db/... -v
+go test ./internal/engine/... -v
+
+# With coverage
+go test ./... -cover
+```
 
 ## Cost
 
@@ -305,7 +200,3 @@ Using Voyage AI `voyage-multimodal-3`:
 
 - ~$0.02 per 1,000 documents indexed
 - ~$0.0001 per search query
-
-## Architecture
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed architecture documentation.
