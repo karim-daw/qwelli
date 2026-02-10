@@ -35,6 +35,23 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 	return nil
 }
 
+// BuildHNSWIndexIfNeeded rebuilds the HNSW index only if new embeddings were added since prevCount.
+// Skips the expensive rebuild when an incremental run added zero new embeddings (no-op).
+// Returns true if a rebuild was performed.
+func (p *ProjectDB) BuildHNSWIndexIfNeeded(prevCount int) (rebuilt bool, err error) {
+	current, err := p.CountEmbeddings()
+	if err != nil {
+		return false, fmt.Errorf("count embeddings: %w", err)
+	}
+	if current == prevCount {
+		return false, nil // No new embeddings, skip rebuild
+	}
+	if err := p.RebuildHNSWIndex(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (p *ProjectDB) SearchANN(query []float32, k int) ([]SearchResult, error) {
 	return p.SearchANNWithFilter(query, k, "")
 }
