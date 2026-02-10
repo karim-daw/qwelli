@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,6 +27,12 @@ type Config struct {
 	RerankModel      string `yaml:"rerank_model"`      // Reranker model to use
 	RerankEndpoint   string `yaml:"rerank_endpoint"`   // Custom reranker endpoint (optional)
 
+	// Parallel processing settings
+	EnableParallel     bool `yaml:"enable_parallel"`      // Enable parallel file processing (default: true)
+	ParallelWorkers    int  `yaml:"parallel_workers"`      // Number of file processing workers (0 = auto: ~90% of CPU cores)
+	EnableParallelPDF  bool `yaml:"enable_parallel_pdf"`   // Enable parallel PDF page processing (default: true)
+	ParallelPDFWorkers int  `yaml:"parallel_pdf_workers"`  // Number of PDF page workers (0 = auto: ~90% of CPU cores)
+
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
 }
@@ -35,17 +42,21 @@ func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 
 	return &Config{
-		EmbeddingProvider: "voyage",
-		APIKey:            os.Getenv("VOYAGE_API_KEY"),
-		Model:             os.Getenv("VOYAGE_MODEL"),
-		Endpoint:          os.Getenv("VOYAGE_EMBEDDING_ENDPOINT"),
-		EnableMultimodal:  true, // Default to true for Voyage
-		ImageQuality:      "medium",
-		EnableReranker:    true, // Default to true (enabled by default)
-		RerankProvider:    "voyage",
-		RerankModel:       os.Getenv("VOYAGE_RERANK_MODEL"),
-		RerankEndpoint:    os.Getenv("VOYAGE_RERANK_ENDPOINT"),
-		IndexDir:          filepath.Join(homeDir, ".qwelli", "indexes"),
+		EmbeddingProvider:  "voyage",
+		APIKey:             os.Getenv("VOYAGE_API_KEY"),
+		Model:              os.Getenv("VOYAGE_MODEL"),
+		Endpoint:           os.Getenv("VOYAGE_EMBEDDING_ENDPOINT"),
+		EnableMultimodal:   true, // Default to true for Voyage
+		ImageQuality:       "medium",
+		EnableReranker:     true, // Default to true (enabled by default)
+		RerankProvider:     "voyage",
+		RerankModel:        os.Getenv("VOYAGE_RERANK_MODEL"),
+		RerankEndpoint:     os.Getenv("VOYAGE_RERANK_ENDPOINT"),
+		EnableParallel:     true, // Parallel file processing enabled by default
+		ParallelWorkers:    0,    // 0 = auto-detect (~90% of CPU cores)
+		EnableParallelPDF:  true, // Parallel PDF page processing enabled by default
+		ParallelPDFWorkers: 0,    // 0 = auto-detect (~90% of CPU cores)
+		IndexDir:           filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
 
@@ -73,7 +84,9 @@ func Load(path ...string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
-	var cfg Config
+	// Start from defaults so missing fields get sensible values
+	// (e.g., existing configs without parallel settings still get parallelism enabled)
+	cfg := *DefaultConfig()
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -129,4 +142,16 @@ func (c *Config) Save(path ...string) error {
 // EnsureIndexDir creates the index directory if it doesn't exist
 func (c *Config) EnsureIndexDir() error {
 	return os.MkdirAll(c.IndexDir, 0755)
+}
+
+// DefaultWorkerCount returns a worker count targeting ~90% CPU utilization.
+// It uses max(floor(NumCPU * 0.9), 1) so we always have at least 1 worker
+// and leave a sliver of headroom for the OS, Go runtime GC, and the main goroutine.
+func DefaultWorkerCount() int {
+	cpus := runtime.NumCPU()
+	workers := int(float64(cpus) * 0.9)
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
 }
