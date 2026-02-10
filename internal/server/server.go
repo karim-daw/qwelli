@@ -20,6 +20,9 @@ type Server struct {
 	service *service.Service
 	port    int
 
+	// HTTP server for graceful shutdown
+	httpServer *http.Server
+
 	// SSE progress broadcasting
 	progressClients map[string][]chan string
 	progressMutex   sync.RWMutex
@@ -65,6 +68,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
 	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
 	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
+	mux.HandleFunc("/api/shutdown", s.handleShutdown)
+	mux.HandleFunc("/api/setup/status", handleSetupStatus)
 
 	// Static web assets
 	distFS, err := fs.Sub(webFS, "web/dist")
@@ -90,7 +95,12 @@ func (s *Server) Start() error {
 	if cfg.EnableReranker {
 		log.Printf("🔄 Reranker: enabled")
 	}
-	return http.ListenAndServe(addr, s.corsMiddleware(mux))
+
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: s.corsMiddleware(mux),
+	}
+	return s.httpServer.ListenAndServe()
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
