@@ -26,6 +26,7 @@ import {
     Moon,
     Terminal as TerminalIcon,
     ChevronDown,
+    Power,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -156,6 +157,13 @@ function App() {
     const [terminalLogs, setTerminalLogs] = useState<Array<{type: string, level: string, message: string, timestamp: number}>>([]);
     const terminalRef = useRef<HTMLDivElement>(null);
 
+    // First-run setup
+    const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+    const [setupApiKey, setSetupApiKey] = useState("");
+    const [setupSaving, setSetupSaving] = useState(false);
+    const [setupError, setSetupError] = useState("");
+    const [quitConfirmed, setQuitConfirmed] = useState(false);
+
     // localStorage helper functions
     const loadRecentSearches = (indexPath: string): RecentSearch[] => {
         try {
@@ -283,8 +291,17 @@ function App() {
     };
 
     useEffect(() => {
-        fetchIndexes();
+        fetch("/api/setup/status")
+            .then((res) => res.json())
+            .then((data) => setNeedsSetup(data.needsSetup === true))
+            .catch(() => setNeedsSetup(false));
     }, []);
+
+    useEffect(() => {
+        if (needsSetup === false) {
+            fetchIndexes();
+        }
+    }, [needsSetup]);
 
     useEffect(() => {
         if (selectedIndex) {
@@ -755,6 +772,98 @@ function App() {
     const placeholderColor = isDark ? "placeholder:text-gray-500" : "placeholder:text-gray-400";
     const focusBorder = isDark ? "focus:border-white/30" : "focus:border-gray-400";
 
+    const handleSetupSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSetupError("");
+        setSetupSaving(true);
+        try {
+            const res = await fetch("/api/setup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    apiKey: setupApiKey.trim(),
+                    model: "voyage-multimodal-3",
+                    endpoint: "https://api.voyageai.com/v1/multimodalembeddings",
+                    enableMultimodal: true,
+                    enableReranker: true,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Setup failed");
+            window.location.reload();
+        } catch (err) {
+            setSetupError(err instanceof Error ? err.message : "Setup failed");
+        } finally {
+            setSetupSaving(false);
+        }
+    };
+
+    const handleQuit = async () => {
+        try {
+            await fetch("/api/shutdown", { method: "POST" });
+            setQuitConfirmed(true);
+        } catch {
+            setQuitConfirmed(true);
+        }
+    };
+
+    if (needsSetup === true) {
+        return (
+            <div className={`flex h-screen ${bgColor} ${textColor} ${isDark ? "dark" : "light"}`}>
+                <div className="flex-1 flex flex-col items-center justify-center p-8">
+                    <div className={`w-full max-w-md ${modalBg} border ${modalBorder} rounded-xl p-8 shadow-2xl`}>
+                        <h1 className="text-2xl font-semibold mb-2">Welcome to Qwelli</h1>
+                        <p className={`text-sm ${mutedText} mb-6`}>
+                            Enter your Voyage AI API key to get started. Get one at{" "}
+                            <a href="https://dash.voyageai.com/" target="_blank" rel="noreferrer" className="underline">dash.voyageai.com</a>
+                        </p>
+                        <form onSubmit={handleSetupSubmit} className="space-y-4">
+                            <div>
+                                <label className={`block text-sm font-medium ${mutedText} mb-2`}>API Key</label>
+                                <input
+                                    type="password"
+                                    value={setupApiKey}
+                                    onChange={(e) => setSetupApiKey(e.target.value)}
+                                    placeholder="sk-..."
+                                    required
+                                    className={`w-full px-4 py-2.5 ${inputBg} border ${cardBorder} rounded-lg ${focusBorder} outline-none ${placeholderColor}`}
+                                    autoComplete="off"
+                                />
+                            </div>
+                            {setupError && <p className="text-sm text-red-500">{setupError}</p>}
+                            <button
+                                type="submit"
+                                disabled={setupSaving || !setupApiKey.trim()}
+                                className={`w-full py-2.5 ${accentBtnBg} ${accentBtnText} rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {setupSaving ? "Saving..." : "Continue"}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleQuit}
+                                className={`w-full py-2 border ${secondaryBtnBorder} rounded-lg ${secondaryBtnHover} text-sm mt-2`}
+                            >
+                                Quit
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (quitConfirmed) {
+        return (
+            <div className={`flex h-screen ${bgColor} ${textColor} items-center justify-center ${isDark ? "dark" : "light"}`}>
+                <div className="text-center">
+                    <CheckCircle className={`w-16 h-16 mx-auto mb-4 ${isDark ? "text-green-400" : "text-green-600"}`} />
+                    <p className="text-lg font-medium">Qwelli has been stopped</p>
+                    <p className={`text-sm ${mutedText} mt-1`}>You can close this tab</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className={`flex h-screen ${bgColor} ${textColor} overflow-hidden ${isDark ? "dark" : "light"}`}>
             {/* Sidebar */}
@@ -902,6 +1011,13 @@ function App() {
                                     title={`Switch to ${isDark ? "light" : "dark"} mode`}
                                 >
                                     {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                </button>
+                                <button
+                                    onClick={handleQuit}
+                                    className={`p-1.5 ${hoverBg} rounded-md transition-colors ${isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"}`}
+                                    title="Quit Qwelli"
+                                >
+                                    <Power className="w-5 h-5" />
                                 </button>
                             </div>
                         </div>
