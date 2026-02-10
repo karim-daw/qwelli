@@ -78,6 +78,13 @@ func (p *ProjectDB) CountChunks() (int, error) {
 	return count, err
 }
 
+// CountEmbeddings returns the total number of embeddings in the database
+func (p *ProjectDB) CountEmbeddings() (int, error) {
+	var count int
+	err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
+	return count, err
+}
+
 func GetDimensionFromDB(dbPath string) (int, error) {
 	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_only", dbPath))
 	if err != nil {
