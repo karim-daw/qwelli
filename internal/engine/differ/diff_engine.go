@@ -73,8 +73,11 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 	// Track which files we've seen in filesystem
 	seenInFS := make(map[string]bool)
 
-	// Use parallel processing for large file sets
-	numWorkers := runtime.NumCPU()
+	// Use parallel processing for large file sets (~90% CPU utilization)
+	numWorkers := int(float64(runtime.NumCPU()) * 0.9)
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
 	if len(fsFiles) < 100 {
 		numWorkers = 1 // Don't parallelize for small sets
 	}
