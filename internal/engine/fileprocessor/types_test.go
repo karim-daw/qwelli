@@ -51,6 +51,10 @@ func TestIsSupported(t *testing.T) {
 		{"pdf file", "pdf", true},
 		{"markdown", "md", true},
 		{"python", "py", true},
+		{"jpg image", "jpg", true},
+		{"jpeg image", "jpeg", true},
+		{"png image", "png", true},
+		{"gif image", "gif", true},
 		{"executable", "exe", false},
 		{"binary", "bin", false},
 		{"unknown", "xyz", false},
@@ -108,5 +112,49 @@ func TestIsPDFFile(t *testing.T) {
 				t.Errorf("IsPDFFile(%s) = %v, want %v", tt.fileType, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsImageFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileType string
+		want     bool
+	}{
+		{"jpg", "jpg", true},
+		{"jpeg", "jpeg", true},
+		{"png", "png", true},
+		{"gif", "gif", true},
+		{"text", "txt", false},
+		{"pdf", "pdf", false},
+		{"bmp", "bmp", false},
+		{"webp", "webp", false},
+		{"unknown", "xyz", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsImageFile(tt.fileType)
+			if got != tt.want {
+				t.Errorf("IsImageFile(%s) = %v, want %v", tt.fileType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSupportedImageExtensions(t *testing.T) {
+	expected := []string{"jpg", "jpeg", "png", "gif"}
+	for _, ext := range expected {
+		if !SupportedImageExtensions[ext] {
+			t.Errorf("%s should be in SupportedImageExtensions", ext)
+		}
+	}
+
+	notExpected := []string{"txt", "pdf", "bmp", "webp"}
+	for _, ext := range notExpected {
+		if SupportedImageExtensions[ext] {
+			t.Errorf("%s should not be in SupportedImageExtensions", ext)
+		}
 	}
 }

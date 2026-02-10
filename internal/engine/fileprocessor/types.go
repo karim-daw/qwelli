@@ -28,9 +28,17 @@ var SupportedPDFExtensions = map[string]bool{
 	"pdf": true,
 }
 
+// SupportedImageExtensions defines supported standalone image file extensions
+var SupportedImageExtensions = map[string]bool{
+	"jpg":  true,
+	"jpeg": true,
+	"png":  true,
+	"gif":  true,
+}
+
 // IsSupported returns true if the file type is supported for processing
 func IsSupported(fileType string) bool {
-	return SupportedTextExtensions[fileType] || SupportedPDFExtensions[fileType]
+	return SupportedTextExtensions[fileType] || SupportedPDFExtensions[fileType] || SupportedImageExtensions[fileType]
 }
 
 // IsTextFile returns true if the file type is a text file
@@ -41,4 +49,9 @@ func IsTextFile(fileType string) bool {
 // IsPDFFile returns true if the file type is a PDF
 func IsPDFFile(fileType string) bool {
 	return SupportedPDFExtensions[fileType]
+}
+
+// IsImageFile returns true if the file type is a supported standalone image
+func IsImageFile(fileType string) bool {
+	return SupportedImageExtensions[fileType]
 }
