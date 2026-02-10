@@ -2,6 +2,7 @@ package extraction
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,6 +31,35 @@ type PDFProcessor struct{}
 // NewPDFProcessor creates a new PDF processor
 func NewPDFProcessor() *PDFProcessor {
 	return &PDFProcessor{}
+}
+
+// ExtractTextFromReader extracts text from a PDF read from memory (io.ReaderAt).
+// filePath is used for metadata fallback (e.g. title from filename).
+func (p *PDFProcessor) ExtractTextFromReader(r io.ReaderAt, size int64, filePath string) ([]PDFPage, *PDFMetadata, error) {
+	reader, err := pdf.NewReader(r, size)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "encrypted") || strings.Contains(errMsg, "password") {
+			return nil, nil, fmt.Errorf("PDF is password protected: %s", filePath)
+		}
+		return nil, nil, fmt.Errorf("failed to open PDF reader: %w", err)
+	}
+	metadata := p.extractMetadata(reader, filePath)
+	var pages []PDFPage
+	pageCount := reader.NumPage()
+	for i := 1; i <= pageCount; i++ {
+		page := reader.Page(i)
+		if page.V.IsNull() {
+			pages = append(pages, PDFPage{PageNumber: i, Text: ""})
+			continue
+		}
+		text, err := p.extractPageText(page)
+		if err != nil {
+			text = ""
+		}
+		pages = append(pages, PDFPage{PageNumber: i, Text: text})
+	}
+	return pages, metadata, nil
 }
 
 // ExtractText extracts text from all pages of a PDF file
