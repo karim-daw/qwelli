@@ -1,7 +1,11 @@
 package db
 
 import (
+	"context"
+	"database/sql/driver"
 	"fmt"
+
+	"github.com/duckdb/duckdb-go/v2"
 )
 
 const fileColumns = `file_id, path, file_type, file_hash, modified_at, size, indexed_at`
@@ -166,4 +170,111 @@ func (p *ProjectDB) InsertEmbedding(emb Embedding) error {
 		emb.ChunkID,
 	)
 	return err
+}
+
+// AppendFiles bulk-inserts files using DuckDB's Appender API (no UPSERT).
+// Caller must ensure no conflicts (fresh index or DeleteFile already called).
+func (p *ProjectDB) AppendFiles(files []File) error {
+	if len(files) == 0 {
+		return nil
+	}
+	sqlConn, err := p.conn.Conn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer sqlConn.Close()
+
+	return sqlConn.Raw(func(driverConn interface{}) error {
+		dc := driverConn.(driver.Conn)
+		app, err := duckdb.NewAppenderFromConn(dc, "", "files")
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		for _, f := range files {
+			if err := app.AppendRow(
+				f.FileID, f.Path, f.FileType, f.FileHash,
+				f.ModifiedAt, f.Size, f.IndexedAt,
+			); err != nil {
+				return err
+			}
+		}
+		return app.Flush()
+	})
+}
+
+// AppendChunksAndEmbeddings bulk-inserts chunks and embeddings using DuckDB's Appender API.
+// embeddings maps chunk index -> vector; chunks without an embedding are skipped for embeddings table.
+func (p *ProjectDB) AppendChunksAndEmbeddings(chunks []Chunk, embeddings map[int][]float32) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	sqlConn, err := p.conn.Conn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer sqlConn.Close()
+
+	return sqlConn.Raw(func(driverConn interface{}) error {
+		dc := driverConn.(driver.Conn)
+
+		// Bulk-append chunks
+		ca, err := duckdb.NewAppenderFromConn(dc, "", "chunks")
+		if err != nil {
+			return err
+		}
+		for _, c := range chunks {
+			contentType := c.ContentType
+			if contentType == "" {
+				contentType = "text"
+			}
+			pageNums := intSliceToInt64(c.PageNumbers)
+			if err := ca.AppendRow(
+				c.ChunkID, c.FileID, c.FilePath, c.FileType,
+				c.ChunkIndex, c.TotalChunks, c.Content,
+				pageNums, contentType, c.ImageData,
+			); err != nil {
+				ca.Close()
+				return err
+			}
+		}
+		if err := ca.Flush(); err != nil {
+			ca.Close()
+			return err
+		}
+		if err := ca.Close(); err != nil {
+			return err
+		}
+
+		// Bulk-append embeddings
+		ea, err := duckdb.NewAppenderFromConn(dc, "", "embeddings")
+		if err != nil {
+			return err
+		}
+		for i, c := range chunks {
+			if vec, ok := embeddings[i]; ok {
+				if err := ea.AppendRow(c.ChunkID, vec); err != nil {
+					ea.Close()
+					return err
+				}
+			}
+		}
+		if err := ea.Flush(); err != nil {
+			ea.Close()
+			return err
+		}
+		return ea.Close()
+	})
+}
+
+func intSliceToInt64(arr []int) []int64 {
+	if len(arr) == 0 {
+		return nil
+	}
+	out := make([]int64, len(arr))
+	for i, v := range arr {
+		out[i] = int64(v)
+	}
+	return out
 }
