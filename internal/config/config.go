@@ -66,6 +66,12 @@ func ConfigPath() string {
 	return filepath.Join(homeDir, ".qwelli", "config.yaml")
 }
 
+// Exists returns true if the config file exists on disk
+func Exists() bool {
+	_, err := os.Stat(ConfigPath())
+	return err == nil
+}
+
 // Load loads the configuration from disk and applies environment variable overrides.
 // If path is provided, loads from that path; otherwise uses the default config path.
 func Load(path ...string) (*Config, error) {
