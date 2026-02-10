@@ -16,6 +16,7 @@ type ProcessOptions struct {
 	ChunkSize        int
 	OverlapSize      int
 	FileContent      string // Optional: file content for text files
+	FileBytes        []byte // Optional: pre-read file bytes for PDF (avoids redundant disk read)
 }
 
 // DefaultProcessOptions returns default processing options
