@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,6 +37,8 @@ type Engine struct {
 	enableMultimodal      bool
 	contentTypeMode       fileprocessor.ContentTypeMode
 	fileProcessingService *fileprocessor.FileProcessingService
+	enableParallel        bool
+	numWorkers            int
 }
 
 func NewEngine(voyageClient voyage.ClientInterface, enableMultimodal bool) *Engine {
@@ -47,6 +50,21 @@ func NewEngine(voyageClient voyage.ClientInterface, enableMultimodal bool) *Engi
 		contentTypeMode:       fileprocessor.ContentTypeBoth,
 		fileProcessingService: fileprocessor.NewFileProcessingService(cfg),
 	}
+}
+
+// SetParallelProcessing enables or disables parallel file processing.
+// When enabled, files are processed concurrently using a worker pool
+// of the specified size. Set numWorkers to 0 to use default (4).
+func (e *Engine) SetParallelProcessing(enabled bool, numWorkers int) {
+	e.enableParallel = enabled
+	e.numWorkers = numWorkers
+}
+
+// SetParallelPDFProcessing enables or disables parallel page processing within PDFs.
+// This parallelizes text extraction and image extraction across pages.
+// Useful for large PDFs with many pages. Set numWorkers to 0 for auto-detect.
+func (e *Engine) SetParallelPDFProcessing(enabled bool, numWorkers int) {
+	e.fileProcessingService.SetParallelPDFProcessing(enabled, numWorkers)
 }
 
 func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
@@ -101,13 +119,24 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 	}
 
 	// Process files into chunks
-	allChunks, skipped, onedriveSkipped := e.processFiles(ctx, projectDB, filesToProcess, progressCb)
+	log.Printf("⚡ Indexing %d files (parallel=%v, workers=%d, CPUs=%d)",
+		len(filesToProcess), e.enableParallel, e.numWorkers, runtime.NumCPU())
+
+	var allChunks []db.Chunk
+	var skipped, onedriveSkipped int
+	if e.enableParallel {
+		allChunks, skipped, onedriveSkipped = e.processFilesParallel(ctx, projectDB, filesToProcess, e.numWorkers, progressCb)
+	} else {
+		allChunks, skipped, onedriveSkipped = e.processFiles(ctx, projectDB, filesToProcess, progressCb)
+	}
 
 	// Embed & store
+	var prevEmbeddingCount int
 	if len(allChunks) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		prevEmbeddingCount, _ = projectDB.CountEmbeddings()
 		embedder, err := embeddings.NewEmbedder(e.voyageClient)
 		if err != nil {
 			return err
@@ -117,15 +146,29 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 		}
 	}
 
-	// Rebuild HNSW index
-	if (needsRebuild || len(allChunks) > 0) && len(allChunks) > 0 {
-		log.Printf("🔨 Rebuilding HNSW index...")
+	// Rebuild HNSW index when embeddings changed: after deletes (needsRebuild) or when new embeddings added
+	if needsRebuild {
+		// Deleted files in incremental run - must rebuild
+		log.Printf("🔨 Rebuilding HNSW index (after file deletions)...")
 		emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
 		start := time.Now()
 		if err := projectDB.RebuildHNSWIndex(); err != nil {
 			return fmt.Errorf("rebuild HNSW index: %w", err)
 		}
 		log.Printf("✅ HNSW index rebuilt in %v", time.Since(start))
+		emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
+	} else if len(allChunks) > 0 {
+		// Added new chunks - rebuild only if embeddings were actually stored
+		emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
+		start := time.Now()
+		rebuilt, err := projectDB.BuildHNSWIndexIfNeeded(prevEmbeddingCount)
+		if err != nil {
+			return fmt.Errorf("rebuild HNSW index: %w", err)
+		}
+		if rebuilt {
+			log.Printf("🔨 Rebuilding HNSW index...")
+			log.Printf("✅ HNSW index rebuilt in %v", time.Since(start))
+		}
 		emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
 	}
 
@@ -230,6 +273,8 @@ func (e *Engine) processFiles(ctx context.Context, projectDB *db.ProjectDB, file
 		var chunks []db.Chunk
 		if file.FileType == "pdf" {
 			chunks, _, err = e.fileProcessingService.ProcessPDF(file)
+		} else if fileprocessor.IsImageFile(file.FileType) {
+			chunks, _, err = e.fileProcessingService.ProcessImage(file)
 		} else {
 			if info.Size() > 500*1024 {
 				continue
