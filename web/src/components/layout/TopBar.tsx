@@ -1,4 +1,4 @@
-import { Menu, ChevronRight, Sun, Moon, Power, Terminal as TerminalIcon } from "lucide-react";
+import { Menu, ChevronRight, Sun, Moon, Power, Terminal as TerminalIcon, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchForm } from "@/components/search/SearchForm";
@@ -9,6 +9,7 @@ interface TopBarProps {
     onToggleSidebar: () => void;
     onToggleTerminal: () => void;
     showTerminal: boolean;
+    onOpenSettings: () => void;
     onQuit: () => void;
 }
 
@@ -16,6 +17,7 @@ export function TopBar({
     onToggleSidebar,
     onToggleTerminal,
     showTerminal,
+    onOpenSettings,
     onQuit,
 }: TopBarProps) {
     const { indexes, selectedIndex, viewMode } = useAppContext();
@@ -56,6 +58,18 @@ export function TopBar({
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>Toggle terminal</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={onOpenSettings}
+                                >
+                                    <Settings className="w-5 h-5" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Settings</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                             <TooltipTrigger asChild>

@@ -5,6 +5,7 @@ import { MainContent } from "./MainContent";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { NewIndexDialog } from "@/components/modals/NewIndexDialog";
 import { IndexProgressModal } from "@/components/modals/IndexProgressModal";
+import { SettingsDialog } from "@/components/modals/SettingsDialog";
 import { useAppContext } from "@/contexts/AppContext";
 import { useIndexes } from "@/hooks/useIndexes";
 import { useTerminal } from "@/hooks/useTerminal";
@@ -35,6 +36,7 @@ export function AppLayout() {
     const [showSidebar, setShowSidebar] = useState(true);
     const [showTerminal, setShowTerminal] = useState(false);
     const [showNewIndexDialog, setShowNewIndexDialog] = useState(false);
+    const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
     useEffect(() => {
         fetchIndexes();
@@ -84,10 +86,16 @@ export function AppLayout() {
                     onToggleSidebar={() => setShowSidebar(!showSidebar)}
                     onToggleTerminal={() => setShowTerminal(!showTerminal)}
                     showTerminal={showTerminal}
+                    onOpenSettings={() => setShowSettingsDialog(true)}
                     onQuit={handleQuit}
                 />
                 <MainContent />
             </div>
+
+            <SettingsDialog
+                open={showSettingsDialog}
+                onOpenChange={setShowSettingsDialog}
+            />
 
             <NewIndexDialog
                 open={showNewIndexDialog}
