@@ -48,3 +48,9 @@ web/package-lock.json
 internal/server/web/dist
 internal/server/web/dist/index.html
 internal/server/web/dist/index.html
+
+.claude/settings.local.json
+
+nul
+
+qwelli-windows-amd64.zip
