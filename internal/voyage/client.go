@@ -127,21 +127,22 @@ func (c *Client) RerankModel() string {
 	return c.rerankModel
 }
 
-// doRequest performs an HTTP request with retry logic
+// doRequest performs an HTTP request with retry logic for timeouts, rate limits, and server errors
 func (c *Client) doRequest(ctx context.Context, httpClient *http.Client, endpoint string, reqBody interface{}) ([]byte, error) {
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	var resp *http.Response
 	var lastErr error
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		if attempt > 0 {
-			waitTime := time.Duration(attempt*attempt) * time.Second // 1s, 4s, 9s
-			log.Printf("  Retry attempt %d/%d after %v", attempt, MaxRetries, waitTime)
-			time.Sleep(waitTime)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
@@ -152,35 +153,53 @@ func (c *Client) doRequest(ctx context.Context, httpClient *http.Client, endpoin
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-		resp, err = httpClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = err
 			if isTimeoutError(err) && attempt < MaxRetries {
-				log.Printf("  Request timed out, will retry...")
+				waitTime := time.Duration(attempt+1) * time.Duration(attempt+1) * time.Second
+				log.Printf("  Request timed out, retrying in %v (%d/%d)...", waitTime, attempt+1, MaxRetries)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(waitTime):
+				}
 				continue
 			}
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
 
-		// Success - break out of retry loop
-		break
-	}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
 
-	if resp == nil {
-		return nil, fmt.Errorf("all retries failed: %w", lastErr)
-	}
-	defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return body, nil
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
+		// Retry on 429 (rate limit) or 5xx (server error)
+		if (resp.StatusCode == 429 || resp.StatusCode >= 500) && attempt < MaxRetries {
+			waitTime := 30 * time.Second * time.Duration(attempt+1) // 30s, 60s, 90s
+			if resp.StatusCode == 429 {
+				log.Printf("  Rate limited (429), waiting %v before retry (%d/%d)...", waitTime, attempt+1, MaxRetries)
+			} else {
+				log.Printf("  Server error (%d), waiting %v before retry (%d/%d)...", resp.StatusCode, waitTime, attempt+1, MaxRetries)
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(waitTime):
+			}
+			lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+			continue
+		}
 
-	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	return body, nil
+	return nil, fmt.Errorf("all retries failed: %w", lastErr)
 }
 
 func isTimeoutError(err error) bool {

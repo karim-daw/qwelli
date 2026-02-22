@@ -14,7 +14,7 @@ import (
 // Batch limits for Voyage API
 const (
 	maxInputsPerBatch   = 950    // API max is 1000, using 950 for near-full batches
-	maxTokensPerBatch   = 200000 // API max is 320000, ~63% to account for image token underestimation
+	maxTokensPerBatch   = 120000 // API max 320K; estimation underestimates by up to 1.75x
 	maxTokensPerInput   = 32000
 	pixelsPerImageToken = 560 // 560 pixels = 1 token for images
 )
