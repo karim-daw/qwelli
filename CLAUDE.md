@@ -1,131 +1,114 @@
-# Qwelli - Claude Code Guidelines
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-Qwelli is a semantic search engine for local files. It indexes folders using Voyage AI embeddings and stores them in DuckDB with HNSW vector search.
+Qwelli is a local semantic file search engine. It indexes folders using Voyage AI embeddings (default model: `voyage-multimodal-3`) and stores them in DuckDB with HNSW vector search. It ships as a single binary with an embedded React web UI.
 
-## Quick Commands
+## Build & Test Commands
 
 ```bash
-# Build
+# Build Go binary only (requires web/dist to exist for embedded UI)
 go build -o qwelli ./cmd/qwelli
 
-# Build with web UI
-./scripts/build-full.sh
+# Build with embedded web UI (Windows native)
+scripts\build-with-ui.bat
 
-# Run tests
+# Build with embedded web UI (Linux/Mac)
+./scripts/build-with-ui.sh
+
+# Build web frontend separately
+cd web && npm install && npm run build
+# Then copy web/dist/ to internal/server/web/dist/
+
+# Run all tests
 go test ./...
 
 # Run specific package tests
 go test ./internal/db/...
-go test ./internal/engine/...
+go test -v ./internal/engine/chunker/...
 
-# Run with verbose output
-go test -v ./internal/engine/embeddings/...
+# Run a single test
+go test -v -run TestFunctionName ./internal/engine/...
 ```
+
+**Build requirements:** Go 1.25+, CGO enabled (DuckDB requires it). On Windows, needs MSYS2 with `mingw-w64-ucrt-x86_64-gcc` and `C:\msys64\ucrt64\bin` in PATH.
 
 ## Architecture
 
+### Layered Design
+
 ```
-cmd/qwelli/          # CLI entry point (cobra)
-internal/
-  cli/               # CLI commands (index, search, list, delete, shell, serve)
-  config/            # YAML config + env var loading (~/.qwelli/config.yaml)
-  db/                # DuckDB wrapper, HNSW index, FTS search
-  engine/            # Core business logic
-    chunker/         # Text chunking
-    differ/          # File change detection
-    embeddings/      # Embedding generation
-    extraction/      # PDF text extraction
-    fileprocessor/   # File type handling
-    search/          # Search strategies (semantic, keyword, hybrid)
-  server/            # HTTP API + embedded React UI
-  service/           # Service layer (owns DB lifecycle)
-  voyage/            # Voyage AI client
-  textutil/          # Text utilities
-web/                 # React frontend (Vite + TypeScript)
+CLI/Server → Service → Engine → DB
+                ↘ Voyage Client (embeddings API)
 ```
 
-## Key Patterns
+- **Service layer** (`internal/service/`) owns DB lifecycle. CLI and server code never open databases directly — they call `service.Load()` or `service.New()`.
+- **Engine** (`internal/engine/engine.go`) receives `*db.ProjectDB` from callers. It coordinates file processing, embedding, and search but doesn't manage connections.
+- **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries.
 
-### Service Layer
-All business operations go through `service.Service`. It owns DB lifecycle - callers never open databases directly.
+### Key Interfaces
 
-```go
-svc, err := service.Load()  // Loads config + creates voyage client + engine
-defer svc.Close()           // If applicable
+- `voyage.ClientInterface` — abstraction over Voyage AI HTTP API (embeddings + reranking). Used for dependency injection in tests.
+- `search.SearchStrategy` — interface for search implementations (`semantic`, `keyword`, `hybrid` via RRF fusion).
+- `fileprocessor.FileProcessingService` — unified file processor that dispatches by type (text, PDF, image).
 
-// Use service methods
-svc.CreateIndex(ctx, folderPath, opts, progressCb)
-svc.Search(folderPath, query, topK, contentType, strategy)
-svc.ListIndexes()
-```
+### Web UI Embedding
 
-### Engine API
-Engine receives `*db.ProjectDB` from callers - it doesn't manage DB connections.
+The React frontend (`web/`) is built to `web/dist/`, copied to `internal/server/web/dist/`, and embedded in the Go binary via `//go:embed`. The server serves it as static files at the root route.
 
-```go
-eng.IndexFolder(ctx, projectDB, folderPath, incremental, progressCb, phaseCb)
-eng.Search(projectDB, query, topK, contentType, strategy)
-eng.GetIndexStatus(projectDB, folderPath)
-```
+### Server Patterns
 
-### DB Layer
-- `db.OpenProjectDB(path, dimension)` - opens/creates database
-- `db.GetDimensionFromDB(path)` - reads dimension from existing DB
-- HNSW index must be rebuilt after embedding changes
+- SSE (Server-Sent Events) for real-time indexing progress (`/api/index/progress`) and terminal output (`/api/terminal/stream`).
+- Search results cached in-memory with 5-minute TTL.
+- Background indexing with cancellation support via context.
+- Setup server (`setup_server.go`) runs on first launch when no config exists, then restarts as the main server.
+
+### Indexing Pipeline
+
+`resolving` → `processing` → `embedding` → `storing` → `hnsw` → `complete`
+
+Files are scanned, text/images extracted (with parallel workers), embeddings generated via Voyage API in batches, stored in DuckDB, then the HNSW index is rebuilt if embeddings changed.
 
 ## Environment Variables
 
 ```bash
 VOYAGE_API_KEY=...              # Required
-VOYAGE_MODEL=voyage-3           # Embedding model
-VOYAGE_EMBEDDING_ENDPOINT=...   # API endpoint
-VOYAGE_RERANK_MODEL=...         # Optional reranker
-VOYAGE_RERANK_ENDPOINT=...      # Optional reranker endpoint
+VOYAGE_MODEL=voyage-multimodal-3  # Embedding model (default)
+VOYAGE_EMBEDDING_ENDPOINT=...  # API endpoint
+VOYAGE_RERANK_MODEL=...        # Optional reranker
+VOYAGE_RERANK_ENDPOINT=...     # Optional reranker endpoint
+ENABLE_RERANKER=true           # Enable/disable reranking
 ```
 
-## Config Location
+Environment variables override `~/.qwelli/config.yaml` values.
+
+## Data Storage
 
 - Config: `~/.qwelli/config.yaml`
-- Indexes: `~/.qwelli/indexes/*.db`
+- Indexes: `~/.qwelli/indexes/*.db` (one DuckDB file per indexed folder)
 
-## File Types Supported
+## Adding a New CLI Command
 
-PDF, TXT, MD, GO, PY, JS, TS, JSON, YAML, and more (see `fileprocessor.IsSupported`)
+1. Create `internal/cli/newcmd.go` with `NewNewcmdCmd()` returning `*cobra.Command`
+2. Register in `cmd/qwelli/main.go` via `rootCmd.AddCommand()`
 
-## Search Strategies
+## Adding a New API Endpoint
 
-- `semantic` - Vector similarity (default)
-- `keyword` - Full-text search with TF-IDF scoring
-- `hybrid` - Combines both with RRF fusion
+1. Add handler in `internal/server/handler_*.go`
+2. Register route in `server.go` `setupRoutes()`
+3. Add request/response types to `types.go` if needed
 
 ## Testing Notes
 
-- API tests in `indexer_test.go` require `VOYAGE_*` env vars (skipped if missing)
-- PDF tests look for files in `testdata/pdf_samples/`
-- Use `t.Skip()` not `t.Fatal()` for missing external dependencies
+- Tests requiring `VOYAGE_API_KEY` use `t.Skip()` when the key is missing — never `t.Fatal()`.
+- PDF test fixtures go in `testdata/pdf_samples/`.
+- The `voyage.ClientInterface` can be mocked for unit tests.
 
-## Common Tasks
+## Rules
 
-### Adding a new CLI command
-1. Create `internal/cli/newcmd.go`
-2. Add `NewNewcmdCmd()` function returning `*cobra.Command`
-3. Register in `cmd/qwelli/main.go`
-
-### Adding a new API endpoint
-1. Add handler in `internal/server/handler_*.go`
-2. Register route in `server.go` setupRoutes()
-3. Add types to `types.go` if needed
-
-### Modifying search behavior
-- Strategies are in `internal/engine/search/`
-- Each implements `SearchStrategy` interface
-- Hybrid strategy combines results using RRF
-
-## Don't
-
-- Don't open databases directly in CLI/server code - use service layer
-- Don't use `t.Fatal()` for missing API keys in tests - use `t.Skip()`
-- Don't forget to rebuild HNSW index after modifying embeddings
-- Don't commit `.env` files or API keys
+- Never open databases directly outside the service layer.
+- HNSW index must be rebuilt after embedding changes (`BuildHNSWIndexIfNeeded` or `RebuildHNSWIndex`).
+- Changing the embedding model requires re-creating the database (dimension is fixed at creation time). The service layer detects this automatically via `handleModelChange()`.
+- Files >500KB are skipped. OneDrive placeholder files are detected and skipped.
