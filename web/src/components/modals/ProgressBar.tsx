@@ -1,5 +1,12 @@
 import type { IndexProgress } from "@/types/progress";
 
+const phaseLabels: Record<string, string> = {
+    processing: "Processing files...",
+    embedding: "Generating embeddings...",
+    storing: "Storing chunks...",
+    hnsw: "Building search index...",
+};
+
 interface ProgressBarProps {
     progress: IndexProgress;
     phase: string;
@@ -8,14 +15,14 @@ interface ProgressBarProps {
 export function ProgressBar({ progress, phase }: ProgressBarProps) {
     const percent =
         progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
+    const label = phaseLabels[phase] || "Processing files...";
+    const showFile = phase === "" || phase === "processing";
 
     return (
         <>
             <div className="mb-6">
                 <div className="flex items-center justify-between text-sm mb-2">
-                    <span className="text-muted-foreground">
-                        Processing files...
-                    </span>
+                    <span className="text-muted-foreground">{label}</span>
                     <span className="font-medium">
                         {progress.current} / {progress.total}
                     </span>
@@ -31,22 +38,23 @@ export function ProgressBar({ progress, phase }: ProgressBarProps) {
                 </div>
             </div>
 
-            {/* Current File */}
-            <div className="bg-muted rounded-lg p-4 border mb-6">
-                <div className="flex items-start gap-3">
-                    <div className="mt-1">
-                        <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <div className="text-xs text-muted-foreground mb-1">
-                            {phase || "Current file"}
+            {showFile && progress.file && (
+                <div className="bg-muted rounded-lg p-4 border mb-6">
+                    <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                            <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
                         </div>
-                        <div className="font-mono text-sm truncate">
-                            {progress.file}
+                        <div className="flex-1 min-w-0">
+                            <div className="text-xs text-muted-foreground mb-1">
+                                Current file
+                            </div>
+                            <div className="font-mono text-sm truncate">
+                                {progress.file}
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
         </>
     );
 }

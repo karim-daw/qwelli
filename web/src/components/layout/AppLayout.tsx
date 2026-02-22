@@ -48,9 +48,10 @@ export function AppLayout() {
     };
 
     const handleCreateIndex = async (path: string, contentType: string) => {
+        setShowNewIndexDialog(false);
         indexProgress.start(path, {
             onComplete: fetchIndexes,
-            onCancelled: () => setShowNewIndexDialog(false),
+            onCancelled: () => {},
         });
 
         try {
