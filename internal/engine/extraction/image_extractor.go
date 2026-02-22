@@ -92,19 +92,19 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			continue
+			continue // Skip directories
 		}
 
 		imagePath := filepath.Join(tmpDir, entry.Name())
 		imageData, err := os.ReadFile(imagePath)
 		if err != nil {
-			continue
+			continue // Skip unreadable files
 		}
 
 		// Parse image to get dimensions and format
 		img, format, err := e.parseImage(imageData)
 		if err != nil {
-			continue
+			continue // Skip unparseable images
 		}
 
 		// Get dimensions
@@ -116,13 +116,13 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 		// Pre-filter: skip images that are too small BEFORE base64 encoding (expensive)
 		if width < MinImageWidth || height < MinImageHeight || pixels < MinImagePixels {
 			skippedSmall++
-			continue
+			continue // Skip images below minimum dimensions
 		}
 
 		// Pre-filter: skip images that are too large
 		if width > MaxImageWidth || height > MaxImageHeight || pixels > MaxImagePixels {
 			skippedLarge++
-			continue
+			continue // Skip images above maximum dimensions
 		}
 
 		// Compress image if needed
@@ -187,19 +187,19 @@ func (e *ImageExtractor) ExtractImagesByPage(pdfPath string, pageNumber int) ([]
 	var images []PDFImage
 	for _, entry := range entries {
 		if entry.IsDir() {
-			continue
+			continue // Skip directories
 		}
 
 		imagePath := filepath.Join(tmpDir, entry.Name())
 		imageData, err := os.ReadFile(imagePath)
 		if err != nil {
-			continue
+			continue // Skip unreadable files
 		}
 
 		// Parse image to get dimensions and format
 		img, format, err := e.parseImage(imageData)
 		if err != nil {
-			continue
+			continue // Skip unparseable images
 		}
 
 		// Get dimensions
@@ -210,12 +210,12 @@ func (e *ImageExtractor) ExtractImagesByPage(pdfPath string, pageNumber int) ([]
 
 		// Pre-filter: skip images that are too small BEFORE base64 encoding
 		if width < MinImageWidth || height < MinImageHeight || pixels < MinImagePixels {
-			continue
+			continue // Skip images below minimum dimensions
 		}
 
 		// Pre-filter: skip images that are too large
 		if width > MaxImageWidth || height > MaxImageHeight || pixels > MaxImagePixels {
-			continue
+			continue // Skip images above maximum dimensions
 		}
 
 		// Compress image if needed

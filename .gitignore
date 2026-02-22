@@ -46,8 +46,6 @@ web/node_modules/
 web/dist/
 web/package-lock.json
 internal/server/web/dist
-internal/server/web/dist/index.html
-internal/server/web/dist/index.html
 
 # Claude Code
 .claude/
@@ -56,4 +54,3 @@ internal/server/web/dist/index.html
 build/
 dist/
 *.zip
-nul
