@@ -42,7 +42,7 @@ export function TerminalPanel({
 
     return (
         <div
-            className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-2xl z-50"
+            className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-2xl z-50 flex flex-col"
             style={{ height }}
         >
             {/* Resize Handle */}
@@ -83,7 +83,7 @@ export function TerminalPanel({
             {/* Content */}
             <div
                 ref={terminalRef}
-                className="h-full overflow-auto p-4 font-mono text-sm custom-scrollbar bg-gray-50 dark:bg-gray-950"
+                className="flex-1 min-h-0 overflow-auto p-4 font-mono text-sm custom-scrollbar bg-gray-50 dark:bg-gray-950"
             >
                 {logs.length === 0 ? (
                     <p className="text-muted-foreground">
