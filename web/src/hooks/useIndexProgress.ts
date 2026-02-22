@@ -41,7 +41,23 @@ export function useIndexProgress() {
                         });
                         break;
                     case "phase":
-                        setPhase(data.message || data.phase || "");
+                        setPhase(data.phase || "");
+                        if (
+                            data.current != null &&
+                            data.total != null &&
+                            data.total > 0
+                        ) {
+                            setProgress((prev) =>
+                                prev
+                                    ? {
+                                          ...prev,
+                                          current: data.current!,
+                                          total: data.total!,
+                                          file: data.message || prev.file,
+                                      }
+                                    : prev,
+                            );
+                        }
                         break;
                     case "complete":
                         eventSource.close();

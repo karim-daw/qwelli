@@ -16,6 +16,8 @@ export interface SSEPhaseMessage {
     type: "phase";
     phase?: string;
     message?: string;
+    current?: number;
+    total?: number;
 }
 
 export interface SSECompleteMessage {
