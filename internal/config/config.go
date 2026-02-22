@@ -33,7 +33,6 @@ type Config struct {
 	EnableParallelPDF       bool `yaml:"enable_parallel_pdf"`       // Enable parallel PDF page processing (default: true)
 	ParallelPDFWorkers      int  `yaml:"parallel_pdf_workers"`      // Number of PDF page workers (0 = auto: ~90% of CPU cores)
 	MaxConcurrentEmbeddings int  `yaml:"max_concurrent_embeddings"` // Max parallel embedding API calls (default: 5)
-	EnableStreamingPipeline bool `yaml:"enable_streaming_pipeline"` // Overlap processing and embedding phases (default: true)
 
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
@@ -59,7 +58,6 @@ func DefaultConfig() *Config {
 		EnableParallelPDF:       true, // Parallel PDF page processing enabled by default
 		ParallelPDFWorkers:      0,    // 0 = auto-detect (~90% of CPU cores)
 		MaxConcurrentEmbeddings: 5,    // Max parallel embedding API calls
-		EnableStreamingPipeline: true, // Overlap processing and embedding phases
 		IndexDir:           filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }

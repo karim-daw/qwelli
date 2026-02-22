@@ -11,18 +11,12 @@ import (
 	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
 
-// EmbeddingCache is the interface for looking up and storing cached embeddings.
-type EmbeddingCache interface {
-	LookupEmbeddingCache(hashes []string) (map[string][]float32, error)
-	StoreEmbeddingCache(entries []db.CacheEntry) error
-}
-
 // EmbeddingGenerator handles embedding generation for chunks
 type EmbeddingGenerator struct {
 	embedder         *Embedder
 	imageValidator   *extraction.ImageValidator
 	enableMultimodal bool
-	cache            EmbeddingCache
+	cache            *db.ProjectDB
 }
 
 func NewEmbeddingGenerator(embedder *Embedder, enableMultimodal bool) *EmbeddingGenerator {
@@ -34,7 +28,7 @@ func NewEmbeddingGenerator(embedder *Embedder, enableMultimodal bool) *Embedding
 }
 
 // SetCache enables the embedding cache for this generator.
-func (g *EmbeddingGenerator) SetCache(cache EmbeddingCache) {
+func (g *EmbeddingGenerator) SetCache(cache *db.ProjectDB) {
 	g.cache = cache
 }
 

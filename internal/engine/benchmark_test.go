@@ -451,7 +451,7 @@ func BenchmarkProcessFiles_Sequential(b *testing.B) {
 				}
 
 				ctx := context.Background()
-				chunks, _, _ := eng.processFiles(ctx, projectDB, files, nil)
+				chunks, _, _ := eng.processFilesParallel(ctx, projectDB, files, 1, nil)
 
 				b.ReportMetric(float64(len(chunks)), "chunks")
 				projectDB.Close()
@@ -545,7 +545,7 @@ func TestProcessFiles_SequentialVsParallel(t *testing.T) {
 
 	ctx := context.Background()
 	seqStart := time.Now()
-	seqChunks, seqSkipped, _ := eng.processFiles(ctx, seqDB, files, nil)
+	seqChunks, seqSkipped, _ := eng.processFilesParallel(ctx, seqDB, files, 1, nil)
 	seqDuration := time.Since(seqStart)
 
 	t.Logf("Sequential: %v (chunks=%d, skipped=%d)", seqDuration, len(seqChunks), seqSkipped)
