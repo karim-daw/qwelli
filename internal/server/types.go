@@ -38,3 +38,24 @@ type searchCacheEntry struct {
 	Results   []SearchResultItem
 	Timestamp time.Time
 }
+
+// ConfigResponse is returned by GET /api/config.
+type ConfigResponse struct {
+	APIKeyMasked string `json:"apiKeyMasked"`
+	Model        string `json:"model"`
+	Endpoint     string `json:"endpoint"`
+}
+
+// UpdateConfigRequest is the POST body for /api/config/update.
+// Pointer fields: nil means "keep current value".
+type UpdateConfigRequest struct {
+	APIKey   *string `json:"apiKey"`
+	Model    *string `json:"model"`
+	Endpoint *string `json:"endpoint"`
+}
+
+// UpdateConfigResponse is returned by POST /api/config/update.
+type UpdateConfigResponse struct {
+	Status   string   `json:"status"`
+	Warnings []string `json:"warnings,omitempty"`
+}

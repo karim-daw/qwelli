@@ -65,6 +65,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/index/progress", s.handleIndexProgress)
 	mux.HandleFunc("/api/index/cancel", s.handleCancelIndex)
 	mux.HandleFunc("/api/index/delete", s.handleDeleteIndex)
+	mux.HandleFunc("/api/config", s.handleGetConfig)
+	mux.HandleFunc("/api/config/update", s.handleUpdateConfig)
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
 	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
 	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
