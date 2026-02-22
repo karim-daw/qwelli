@@ -29,7 +29,11 @@ func New(cfg *config.Config, client voyage.ClientInterface) *Service {
 	if fileWorkers <= 0 {
 		fileWorkers = config.DefaultWorkerCount()
 	}
-	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers)
+	maxEmbedConcurrency := cfg.MaxConcurrentEmbeddings
+	if maxEmbedConcurrency <= 0 {
+		maxEmbedConcurrency = 5
+	}
+	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers, maxEmbedConcurrency)
 
 	pdfWorkers := cfg.ParallelPDFWorkers
 	if pdfWorkers <= 0 {
@@ -53,11 +57,12 @@ func Load() (*Service, error) {
 	}
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
-		APIKey:            cfg.APIKey,
-		EmbeddingModel:    cfg.Model,
-		EmbeddingEndpoint: cfg.Endpoint,
-		RerankModel:       cfg.RerankModel,
-		RerankEndpoint:    cfg.RerankEndpoint,
+		APIKey:               cfg.APIKey,
+		EmbeddingModel:       cfg.Model,
+		EmbeddingEndpoint:    cfg.Endpoint,
+		MaxConcurrentBatches: cfg.MaxConcurrentEmbeddings,
+		RerankModel:          cfg.RerankModel,
+		RerankEndpoint:       cfg.RerankEndpoint,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create voyage client: %w", err)

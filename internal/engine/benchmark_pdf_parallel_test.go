@@ -56,14 +56,14 @@ func TestRealData_PDFParallelPages(t *testing.T) {
 	// Test 1: Sequential file processing, sequential PDF pages
 	t.Log("=== Configuration 1: Sequential files + Sequential PDF pages ===")
 	eng1 := createBenchEngine(128)
-	eng1.SetParallelProcessing(false, 0)
+	eng1.SetParallelProcessing(false, 0, 0)
 	eng1.SetParallelPDFProcessing(false, 0)
 
 	db1, _ := db.OpenProjectDB(filepath.Join(t.TempDir(), "seq_seq.db"), 128)
 	defer db1.Close()
 
 	start1 := time.Now()
-	chunks1, _, _ := eng1.processFiles(ctx, db1, files, nil)
+	chunks1, _, _ := eng1.processFilesParallel(ctx, db1, files, 1, nil)
 	dur1 := time.Since(start1)
 	t.Logf("✓ Sequential files + Sequential pages: %v (%d chunks)", dur1, len(chunks1))
 	t.Log("")
@@ -71,7 +71,7 @@ func TestRealData_PDFParallelPages(t *testing.T) {
 	// Test 2: Parallel file processing, sequential PDF pages
 	t.Log("=== Configuration 2: Parallel files + Sequential PDF pages ===")
 	eng2 := createBenchEngine(128)
-	eng2.SetParallelProcessing(true, 4)
+	eng2.SetParallelProcessing(true, 4, 0)
 	eng2.SetParallelPDFProcessing(false, 0)
 
 	db2, _ := db.OpenProjectDB(filepath.Join(t.TempDir(), "par_seq.db"), 128)
@@ -87,14 +87,14 @@ func TestRealData_PDFParallelPages(t *testing.T) {
 	// Test 3: Sequential file processing, parallel PDF pages
 	t.Log("=== Configuration 3: Sequential files + Parallel PDF pages ===")
 	eng3 := createBenchEngine(128)
-	eng3.SetParallelProcessing(false, 0)
+	eng3.SetParallelProcessing(false, 0, 0)
 	eng3.SetParallelPDFProcessing(true, 4)
 
 	db3, _ := db.OpenProjectDB(filepath.Join(t.TempDir(), "seq_par.db"), 128)
 	defer db3.Close()
 
 	start3 := time.Now()
-	chunks3, _, _ := eng3.processFiles(ctx, db3, files, nil)
+	chunks3, _, _ := eng3.processFilesParallel(ctx, db3, files, 1, nil)
 	dur3 := time.Since(start3)
 	t.Logf("✓ Sequential files + Parallel pages: %v (%d chunks)", dur3, len(chunks3))
 	t.Logf("  Speedup vs baseline: %.2fx", float64(dur1)/float64(dur3))
@@ -103,7 +103,7 @@ func TestRealData_PDFParallelPages(t *testing.T) {
 	// Test 4: Parallel file processing, parallel PDF pages
 	t.Log("=== Configuration 4: Parallel files + Parallel PDF pages ===")
 	eng4 := createBenchEngine(128)
-	eng4.SetParallelProcessing(true, 4)
+	eng4.SetParallelProcessing(true, 4, 0)
 	eng4.SetParallelPDFProcessing(true, 4)
 
 	db4, _ := db.OpenProjectDB(filepath.Join(t.TempDir(), "par_par.db"), 128)
@@ -172,7 +172,7 @@ func BenchmarkPDFParallelPages(b *testing.B) {
 		b.Run(cfg.name, func(b *testing.B) {
 			eng := createBenchEngine(128)
 			if cfg.parallelFiles {
-				eng.SetParallelProcessing(true, cfg.fileWorkers)
+				eng.SetParallelProcessing(true, cfg.fileWorkers, 0)
 			}
 			if cfg.parallelPages {
 				eng.SetParallelPDFProcessing(true, cfg.pageWorkers)
@@ -193,7 +193,7 @@ func BenchmarkPDFParallelPages(b *testing.B) {
 				if cfg.parallelFiles {
 					chunks, _, _ = eng.processFilesParallel(ctx, projectDB, files, cfg.fileWorkers, nil)
 				} else {
-					chunks, _, _ = eng.processFiles(ctx, projectDB, files, nil)
+					chunks, _, _ = eng.processFilesParallel(ctx, projectDB, files, 1, nil)
 				}
 
 				b.ReportMetric(float64(len(chunks)), "chunks")

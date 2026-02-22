@@ -44,11 +44,11 @@ func (e *Engine) processFilesParallel(ctx context.Context, projectDB *db.Project
 
 	// Result collection: accumulate files and chunks for batch append (Appender is not thread-safe)
 	var (
-		allFiles       []db.File
-		allChunks      []db.Chunk
-		skipped        int
+		allFiles        = make([]db.File, 0, len(files))
+		allChunks       = make([]db.Chunk, 0, len(files)*5) // ~5 chunks per file estimate
+		skipped         int
 		onedriveSkipped int
-		mu             sync.Mutex // Protects allFiles, allChunks, skipped, onedriveSkipped
+		mu              sync.Mutex // Protects allFiles, allChunks, skipped, onedriveSkipped
 	)
 
 	// Atomic counter for progress reporting
@@ -161,6 +161,18 @@ func (e *Engine) processOneFile(f string) fileProcessResult {
 
 	if !e.fileProcessingService.CanProcess(file.FileType) {
 		return fileProcessResult{file: file, skipped: false}
+	}
+
+	// Early skip based on content type mode — avoids noisy warnings downstream
+	mode := e.contentTypeMode
+	if fileprocessor.IsImageFile(file.FileType) && !mode.IncludesStandaloneImages() {
+		return fileProcessResult{skipped: true}
+	}
+	if fileprocessor.IsTextFile(file.FileType) && !mode.IncludesText() {
+		return fileProcessResult{skipped: true}
+	}
+	if fileprocessor.IsPDFFile(file.FileType) && !mode.IncludesText() && !mode.IncludesPDFImages() {
+		return fileProcessResult{skipped: true}
 	}
 
 	// Single read path for files under 50MB: read once, hash from bytes, process from bytes

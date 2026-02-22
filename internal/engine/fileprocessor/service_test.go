@@ -115,20 +115,24 @@ func TestFileProcessingService_ProcessTextLarge(t *testing.T) {
 func TestSetContentTypeMode(t *testing.T) {
 	service := NewFileProcessingService(DefaultProcessingConfig())
 
-	// Default should be ContentTypeBoth
-	if service.config.ContentTypeMode != ContentTypeBoth {
-		t.Errorf("Default content type mode should be ContentTypeBoth, got %s", service.config.ContentTypeMode)
+	// Default should be ContentTypeAll
+	if service.config.ContentTypeMode != ContentTypeAll {
+		t.Errorf("Default content type mode should be ContentTypeAll, got %s", service.config.ContentTypeMode)
 	}
 
-	// Test changing mode
-	service.SetContentTypeMode(ContentTypeText)
-	if service.config.ContentTypeMode != ContentTypeText {
-		t.Errorf("Content type mode not updated, got %s", service.config.ContentTypeMode)
+	// Test changing to each mode
+	modes := []ContentTypeMode{
+		ContentTypeText,
+		ContentTypeImages,
+		ContentTypeTextImages,
+		ContentTypeTextPDFImages,
+		ContentTypeAll,
 	}
-
-	service.SetContentTypeMode(ContentTypeImages)
-	if service.config.ContentTypeMode != ContentTypeImages {
-		t.Errorf("Content type mode not updated, got %s", service.config.ContentTypeMode)
+	for _, mode := range modes {
+		service.SetContentTypeMode(mode)
+		if service.config.ContentTypeMode != mode {
+			t.Errorf("Content type mode not updated to %s, got %s", mode, service.config.ContentTypeMode)
+		}
 	}
 }
 
@@ -147,9 +151,11 @@ func TestFilterChunksByContentType(t *testing.T) {
 		mode ContentTypeMode
 		want int
 	}{
-		{"both", ContentTypeBoth, 4},
+		{"all", ContentTypeAll, 4},
 		{"text only", ContentTypeText, 2},
 		{"images only", ContentTypeImages, 2},
+		{"text+images", ContentTypeTextImages, 2},       // text chunks only (no PDF image extraction)
+		{"text+pdfimages", ContentTypeTextPDFImages, 4}, // unfiltered (text + PDF images)
 	}
 
 	for _, tt := range tests {
@@ -157,6 +163,35 @@ func TestFilterChunksByContentType(t *testing.T) {
 			filtered := service.filterChunksByContentType(chunks, tt.mode)
 			if len(filtered) != tt.want {
 				t.Errorf("filterChunksByContentType(%s) returned %d chunks, want %d", tt.mode, len(filtered), tt.want)
+			}
+		})
+	}
+}
+
+func TestContentTypeModeHelpers(t *testing.T) {
+	tests := []struct {
+		mode              ContentTypeMode
+		wantText          bool
+		wantStandalone    bool
+		wantPDFImages     bool
+	}{
+		{ContentTypeText, true, false, false},
+		{ContentTypeImages, false, true, false},
+		{ContentTypeTextImages, true, true, false},
+		{ContentTypeTextPDFImages, true, false, true},
+		{ContentTypeAll, true, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			if got := tt.mode.IncludesText(); got != tt.wantText {
+				t.Errorf("IncludesText() = %v, want %v", got, tt.wantText)
+			}
+			if got := tt.mode.IncludesStandaloneImages(); got != tt.wantStandalone {
+				t.Errorf("IncludesStandaloneImages() = %v, want %v", got, tt.wantStandalone)
+			}
+			if got := tt.mode.IncludesPDFImages(); got != tt.wantPDFImages {
+				t.Errorf("IncludesPDFImages() = %v, want %v", got, tt.wantPDFImages)
 			}
 		})
 	}

@@ -9,7 +9,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { convertWindowsPathToWSL } from "@/lib/format";
 
 interface NewIndexDialogProps {
@@ -26,8 +25,8 @@ export function NewIndexDialog({
     indexing,
 }: NewIndexDialogProps) {
     const [newIndexPath, setNewIndexPath] = useState("");
-    const [contentType, setContentType] = useState<"both" | "text" | "images">(
-        "both",
+    const [contentType, setContentType] = useState<"text" | "images" | "text_images" | "text_pdfimages" | "all">(
+        "all",
     );
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -40,7 +39,7 @@ export function NewIndexDialog({
         if (!indexing) {
             onOpenChange(false);
             setNewIndexPath("");
-            setContentType("both");
+            setContentType("all");
         }
     };
 
@@ -109,37 +108,29 @@ export function NewIndexDialog({
                     {/* Content Type Selection */}
                     <div>
                         <Label className="mb-2 block">Index Content Type</Label>
-                        <div className="flex gap-2">
-                            {(
-                                [
-                                    { value: "both", label: "Both" },
-                                    { value: "text", label: "Text Only" },
-                                    { value: "images", label: "Images Only" },
-                                ] as const
-                            ).map((opt) => (
-                                <Button
-                                    key={opt.value}
-                                    type="button"
-                                    variant={
-                                        contentType === opt.value
-                                            ? "default"
-                                            : "outline"
-                                    }
-                                    className={cn("flex-1")}
-                                    onClick={() => setContentType(opt.value)}
-                                    disabled={indexing}
-                                >
-                                    {opt.label}
-                                </Button>
-                            ))}
-                        </div>
+                        <select
+                            value={contentType}
+                            onChange={(e) => setContentType(e.target.value as typeof contentType)}
+                            disabled={indexing}
+                            className="w-full px-3 py-2 text-sm rounded-md border bg-background text-foreground border-input"
+                        >
+                            <option value="all">Full Multimodal</option>
+                            <option value="text">Text Only</option>
+                            <option value="images">Images Only</option>
+                            <option value="text_images">Text + Images</option>
+                            <option value="text_pdfimages">Text + PDF Images</option>
+                        </select>
                         <p className="text-xs text-muted-foreground mt-2">
-                            {contentType === "both" &&
-                                "Index both text and images from PDFs"}
+                            {contentType === "all" &&
+                                "Text, standalone images, and PDF image extraction"}
                             {contentType === "text" &&
-                                "Index only text content (faster, smaller index)"}
+                                "Text files and PDF text only (fastest)"}
                             {contentType === "images" &&
-                                "Index only images from PDFs"}
+                                "Standalone image files only"}
+                            {contentType === "text_images" &&
+                                "Text files, PDF text, and standalone images (no PDF image extraction)"}
+                            {contentType === "text_pdfimages" &&
+                                "Text files, PDF text, and PDF image extraction (no standalone images)"}
                         </p>
                     </div>
 

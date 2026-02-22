@@ -168,6 +168,9 @@ func TestProcessImage_GIF(t *testing.T) {
 }
 
 func TestProcessImage_TextOnlyMode(t *testing.T) {
+	// Image skip for text-only mode now happens at the engine level (processOneFile),
+	// not inside the processor. The processor itself should successfully process
+	// the image regardless of content type mode.
 	tmpDir := t.TempDir()
 	imgPath := createTestImage(t, tmpDir, "test.png", 100, 100, "png")
 
@@ -180,12 +183,15 @@ func TestProcessImage_TextOnlyMode(t *testing.T) {
 	service := NewFileProcessingService(DefaultProcessingConfig())
 	service.SetContentTypeMode(ContentTypeText)
 
-	_, _, err := service.ProcessImage(file)
-	if err == nil {
-		t.Error("Expected error in text-only mode, got nil")
+	chunks, contents, err := service.ProcessImage(file)
+	if err != nil {
+		t.Fatalf("ProcessImage should succeed even in text-only mode (skip is done earlier): %v", err)
 	}
-	if err != nil && !strings.Contains(err.Error(), "text-only mode") {
-		t.Errorf("Expected text-only mode error, got: %v", err)
+	if len(chunks) != 1 {
+		t.Errorf("Expected 1 chunk, got %d", len(chunks))
+	}
+	if len(contents) != 1 {
+		t.Errorf("Expected 1 content, got %d", len(contents))
 	}
 }
 
