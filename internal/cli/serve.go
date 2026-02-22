@@ -27,14 +27,14 @@ func NewServeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to run the server on")
+	cmd.Flags().IntVarP(&port, "port", "p", 0, "Port to run the server on (0 = random available port)")
 
 	return cmd
 }
 
 // RunServeDefault runs serve with default settings and auto-opens browser
 func RunServeDefault() error {
-	return runServe(8080, true, false)
+	return runServe(0, true, false)
 }
 
 func runServe(port int, openBrowser bool, portExplicit bool) error {
@@ -46,9 +46,7 @@ func runServe(port int, openBrowser bool, portExplicit bool) error {
 			if err != nil {
 				return err
 			}
-			if actualPort != port {
-				log.Printf("Port %d in use, falling back to port %d", port, actualPort)
-			}
+			log.Printf("Starting on port %d", actualPort)
 
 			if openBrowser {
 				serverErr := make(chan error, 1)
@@ -79,9 +77,7 @@ func runServe(port int, openBrowser bool, portExplicit bool) error {
 		if err != nil {
 			return err
 		}
-		if actualPort != port {
-			log.Printf("Port %d in use, falling back to port %d", port, actualPort)
-		}
+		log.Printf("Starting on port %d", actualPort)
 
 		if openBrowser {
 			serverErr := make(chan error, 1)
