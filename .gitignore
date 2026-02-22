@@ -48,3 +48,12 @@ web/package-lock.json
 internal/server/web/dist
 internal/server/web/dist/index.html
 internal/server/web/dist/index.html
+
+# Claude Code
+.claude/
+
+# Build artifacts
+build/
+dist/
+*.zip
+nul
