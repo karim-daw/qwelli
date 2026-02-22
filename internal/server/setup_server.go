@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -13,6 +14,7 @@ import (
 // It serves the web UI and setup API only (no indexes, search, etc).
 type SetupServer struct {
 	port         int
+	listener     net.Listener
 	httpServer   *http.Server
 	restartAfter bool
 }
@@ -20,6 +22,18 @@ type SetupServer struct {
 // NewSetupServer creates a setup-mode server.
 func NewSetupServer(port int) *SetupServer {
 	return &SetupServer{port: port}
+}
+
+// Listen binds to the preferred port (or falls back to an available one).
+// It stores the listener and updates the port. Call this before Start().
+func (ss *SetupServer) Listen(portExplicit bool) (int, error) {
+	ln, actualPort, err := ResolveListener(ss.port, portExplicit)
+	if err != nil {
+		return 0, err
+	}
+	ss.listener = ln
+	ss.port = actualPort
+	return actualPort, nil
 }
 
 // Start runs the setup server. Returns when the server shuts down.
@@ -42,6 +56,9 @@ func (ss *SetupServer) Start() error {
 	ss.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: setupCORS(mux),
+	}
+	if ss.listener != nil {
+		return ss.httpServer.Serve(ss.listener)
 	}
 	return ss.httpServer.ListenAndServe()
 }

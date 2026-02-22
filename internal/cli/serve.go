@@ -3,10 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"runtime"
-	"time"
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/server"
@@ -22,7 +22,8 @@ func NewServeCmd() *cobra.Command {
 		Short: "Start web UI server",
 		Long:  "Start the web interface for Qwelli on localhost",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(port, false)
+			portExplicit := cmd.Flags().Changed("port")
+			return runServe(port, false, portExplicit)
 		},
 	}
 
@@ -33,27 +34,36 @@ func NewServeCmd() *cobra.Command {
 
 // RunServeDefault runs serve with default settings and auto-opens browser
 func RunServeDefault() error {
-	return runServe(8080, true)
+	return runServe(8080, true, false)
 }
 
-func runServe(port int, openBrowser bool) error {
+func runServe(port int, openBrowser bool, portExplicit bool) error {
 	for {
 		if !config.Exists() {
 			// First-run: start setup server
 			ss := server.NewSetupServer(port)
+			actualPort, err := ss.Listen(portExplicit)
+			if err != nil {
+				return err
+			}
+			if actualPort != port {
+				log.Printf("Port %d in use, falling back to port %d", port, actualPort)
+			}
+
 			if openBrowser {
 				serverErr := make(chan error, 1)
 				go func() {
 					serverErr <- ss.Start()
 				}()
-				time.Sleep(1 * time.Second)
-				openBrowserURL(fmt.Sprintf("http://localhost:%d", port))
+				openBrowserURL(fmt.Sprintf("http://localhost:%d", actualPort))
 				if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 					return err
 				}
 				if !ss.RestartRequested() {
 					return nil
 				}
+				// Carry forward the actual port for the main server
+				port = actualPort
 				continue
 			}
 			return ss.Start()
@@ -65,16 +75,20 @@ func runServe(port int, openBrowser bool) error {
 		}
 
 		srv := server.NewServer(svc, port)
+		actualPort, err := srv.Listen(portExplicit)
+		if err != nil {
+			return err
+		}
+		if actualPort != port {
+			log.Printf("Port %d in use, falling back to port %d", port, actualPort)
+		}
 
 		if openBrowser {
 			serverErr := make(chan error, 1)
 			go func() {
 				serverErr <- srv.Start()
 			}()
-
-			time.Sleep(1 * time.Second)
-			openBrowserURL(fmt.Sprintf("http://localhost:%d", port))
-
+			openBrowserURL(fmt.Sprintf("http://localhost:%d", actualPort))
 			return <-serverErr
 		}
 
