@@ -104,7 +104,7 @@ func (s *Server) startIndexing(folderPath string, incremental bool) {
 			kind = "incremental"
 		}
 		logMsg := fmt.Sprintf("Starting %s indexing: %s", kind, folderPath)
-		log.Printf(logMsg)
+		log.Print(logMsg)
 		BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"%s"}`, logMsg))
 
 		progressCb := func(current, total int, filename string) {
@@ -144,19 +144,19 @@ func (s *Server) startIndexing(folderPath string, incremental bool) {
 
 		if ctx.Err() == context.Canceled {
 			logMsg := fmt.Sprintf("Indexing cancelled: %s", folderPath)
-			log.Printf(logMsg)
+			log.Print(logMsg)
 			BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"warning","message":"%s"}`, logMsg))
 			s.broadcastProgress(folderPath, `{"type":"cancelled"}`)
 			return
 		}
 		if err != nil {
 			logMsg := fmt.Sprintf("Indexing failed: %v", err)
-			log.Printf(logMsg)
+			log.Print(logMsg)
 			BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"error","message":"%s"}`, logMsg))
 			s.broadcastProgress(folderPath, fmt.Sprintf(`{"type":"error","message":"%s"}`, err.Error()))
 		} else {
 			logMsg := fmt.Sprintf("Indexing completed: %s", folderPath)
-			log.Printf(logMsg)
+			log.Print(logMsg)
 			BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"success","message":"%s"}`, logMsg))
 			s.broadcastProgress(folderPath, `{"type":"complete"}`)
 		}
@@ -183,7 +183,7 @@ func (s *Server) handleDeleteIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logMsg := fmt.Sprintf("🗑️  Deleted index: %s", req.IndexPath)
-	log.Printf(logMsg)
+	log.Print(logMsg)
 	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"%s"}`, logMsg))
 	jsonOK(w, map[string]string{"message": "Deleted", "path": req.IndexPath})
 }
