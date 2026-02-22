@@ -49,8 +49,11 @@ internal/server/web/dist
 internal/server/web/dist/index.html
 internal/server/web/dist/index.html
 
-.claude/settings.local.json
+# Claude Code
+.claude/
 
+# Build artifacts
+build/
+dist/
+*.zip
 nul
-
-qwelli-windows-amd64.zip

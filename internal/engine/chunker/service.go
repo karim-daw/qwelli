@@ -54,30 +54,20 @@ func (s *ChunkService) ChunkMultimodal(pages []extraction.PDFPage, images []extr
 	// Text chunks are already in the unified Chunk format, just add them
 	allChunks = append(allChunks, textChunks...)
 
-	// Add image chunks (filter out tiny and huge images)
+	// Add image chunks (images should already be pre-filtered during extraction)
+	// But we double-check here for safety
 	skippedTooSmall := 0
 	skippedTooLarge := 0
 	for _, img := range images {
-		// Filter out images that are too small (~1/3 of A4 page minimum)
-		// Minimum: 500x350 pixels (175,000 pixels total)
-		minWidth := 500
-		minHeight := 350
-		minPixels := 175_000
 		pixelCount := img.Width * img.Height
 
-		if img.Width < minWidth || img.Height < minHeight || pixelCount < minPixels {
+		// Double-check size filters (should already be filtered during extraction)
+		if img.Width < extraction.MinImageWidth || img.Height < extraction.MinImageHeight || pixelCount < extraction.MinImagePixels {
 			skippedTooSmall++
 			continue
 		}
 
-		// Filter out images that are too large (max dimensions and pixel count)
-		// Maximum: 4000x3000 pixels (12M pixels) - reasonable upper limit for search
-		// Voyage API limit is 16M pixels, but we'll be more conservative
-		maxWidth := 4000
-		maxHeight := 3000
-		maxPixels := 12_000_000 // 12 million pixels
-
-		if img.Width > maxWidth || img.Height > maxHeight || pixelCount > maxPixels {
+		if img.Width > extraction.MaxImageWidth || img.Height > extraction.MaxImageHeight || pixelCount > extraction.MaxImagePixels {
 			skippedTooLarge++
 			continue
 		}

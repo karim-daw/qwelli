@@ -13,7 +13,7 @@ func (e *ImageExtractor) ExtractImagesByPagesParallel(pdfPath string, pageNumber
 	}
 
 	// For small page counts, use sequential extraction
-	if len(pageNumbers) < 5 {
+	if len(pageNumbers) < 3 {
 		var allImages []PDFImage
 		for _, pageNum := range pageNumbers {
 			images, err := e.ExtractImagesByPage(pdfPath, pageNum)
