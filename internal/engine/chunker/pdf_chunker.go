@@ -25,6 +25,10 @@ func NewPDFChunkStrategy(metadata *extraction.PDFMetadata, filePath string) *PDF
 	}
 }
 
+// MinTokensForTextPage is the minimum tokens a page needs to be considered text-worthy.
+// Pages with fewer tokens are assumed to be image-heavy and their sparse text is skipped.
+const MinTokensForTextPage = 30
+
 func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, baseMetadata map[string]interface{}) ([]Chunk, error) {
 	pages, ok := content.([]extraction.PDFPage)
 	if !ok {
@@ -32,11 +36,22 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 	}
 
 	var allChunks []Chunk
+	skippedSparsePages := 0
 
 	// Process each page individually
 	for _, page := range pages {
+		trimmedText := strings.TrimSpace(page.Text)
+
 		// Skip empty pages
-		if strings.TrimSpace(page.Text) == "" {
+		if trimmedText == "" {
+			continue
+		}
+
+		// Skip text-sparse pages (likely image-only pages with captions/headers)
+		// These pages typically have scattered text that doesn't add search value
+		pageTokens := textutil.EstimateTokens(trimmedText)
+		if pageTokens < MinTokensForTextPage {
+			skippedSparsePages++
 			continue
 		}
 
@@ -45,12 +60,10 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 			log.Printf("⚠️  PDF chunker: Page has invalid PageNumber: %d (should be >= 1)", page.PageNumber)
 		}
 
-		pageTokens := textutil.EstimateTokens(page.Text)
-
-		// If page fits in one chunk, keep it as-is
+		// If page fits in one chunk, keep it as-is (pageTokens already calculated above)
 		if pageTokens <= config.ChunkSize {
 			chunk := Chunk{
-				Content:     page.Text,
+				Content:     trimmedText,
 				ContentType: "text",
 				PageNumbers: []int{page.PageNumber},
 				ChunkIndex:  len(allChunks),
@@ -89,6 +102,11 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 				allChunks = append(allChunks, chunk)
 			}
 		}
+	}
+
+	// Log skipped sparse pages
+	if skippedSparsePages > 0 {
+		log.Printf("  Skipped %d text-sparse pages (< %d tokens)", skippedSparsePages, MinTokensForTextPage)
 	}
 
 	// If no text extracted, return single empty chunk

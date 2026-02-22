@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/textutil"
@@ -12,10 +13,11 @@ import (
 
 // Batch limits for Voyage API
 const (
-	maxInputsPerBatch   = 200    // API max is 1000, but we use 200 for reliability
-	maxTokensPerBatch   = 200000 // API max is 320000
-	maxTokensPerInput   = 32000
-	pixelsPerImageToken = 560 // 560 pixels = 1 token for images
+	maxInputsPerBatch     = 800    // API max is 1000, using 800 for better throughput
+	maxTokensPerBatch     = 250000 // API max is 320000, ~78% for safe headroom with imprecise token estimation
+	maxTokensPerInput     = 32000
+	pixelsPerImageToken   = 560 // 560 pixels = 1 token for images
+	maxConcurrentBatches  = 3   // Number of parallel API calls
 )
 
 // Embed generates an embedding for a single text
@@ -58,23 +60,31 @@ func (c *Client) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, 
 
 	// Create batches that respect Voyage API limits
 	batches := c.createMultimodalBatches(inputs)
-	log.Printf("  Split %d inputs into %d batch(es)", len(inputs), len(batches))
+	log.Printf("  Split %d inputs into %d batch(es), processing up to %d concurrently", len(inputs), len(batches), maxConcurrentBatches)
 
+	// For small number of batches, use sequential processing
+	if len(batches) <= 2 {
+		return c.embedBatchesSequential(ctx, batches, inputs, progressCallback, start)
+	}
+
+	// Use concurrent processing for many batches
+	return c.embedBatchesConcurrent(ctx, batches, inputs, progressCallback, start)
+}
+
+// embedBatchesSequential processes batches one at a time (for small batch counts)
+func (c *Client) embedBatchesSequential(ctx context.Context, batches [][]MultimodalInput, inputs []MultimodalInput, progressCallback func(current, total int), start time.Time) ([][]float32, error) {
 	allEmbeddings := make([][]float32, 0, len(inputs))
-	totalAPICalls := 0
-	batchStartTime := time.Now()
 	totalInputs := len(inputs)
 	processedInputs := 0
+	batchStartTime := time.Now()
 
 	for batchIdx, batch := range batches {
-		// Check for cancellation before processing each batch
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		// Calculate estimated time remaining
 		var eta string
 		if batchIdx > 0 {
 			avgTimePerBatch := time.Since(batchStartTime) / time.Duration(batchIdx)
@@ -83,13 +93,11 @@ func (c *Client) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, 
 			eta = fmt.Sprintf(" (ETA: %v)", estimatedRemaining.Round(time.Second))
 		}
 
-		log.Printf("  Processing batch %d/%d (%d inputs)%s",
-			batchIdx+1, len(batches), len(batch), eta)
+		log.Printf("  Processing batch %d/%d (%d inputs)%s", batchIdx+1, len(batches), len(batch), eta)
 
 		batchStart := time.Now()
 		embeddings, err := c.callEmbeddingAPI(ctx, batch)
 		if err != nil {
-			// Check if cancelled during API call
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -101,22 +109,129 @@ func (c *Client) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, 
 		log.Printf("  Batch %d completed in %v", batchIdx+1, time.Since(batchStart).Round(time.Millisecond))
 
 		if len(embeddings) != len(batch) {
-			return nil, fmt.Errorf("batch %d: expected %d embeddings, got %d",
-				batchIdx+1, len(batch), len(embeddings))
+			return nil, fmt.Errorf("batch %d: expected %d embeddings, got %d", batchIdx+1, len(batch), len(embeddings))
 		}
 
 		allEmbeddings = append(allEmbeddings, embeddings...)
-		totalAPICalls++
 		processedInputs += len(batch)
 
-		// Report progress
 		if progressCallback != nil {
 			progressCallback(processedInputs, totalInputs)
 		}
 	}
 
 	log.Printf("Generated %d embeddings in %d API call(s): %v (avg: %v per embedding)",
-		len(inputs), totalAPICalls, time.Since(start), time.Since(start)/time.Duration(len(inputs)))
+		len(inputs), len(batches), time.Since(start), time.Since(start)/time.Duration(len(inputs)))
+	return allEmbeddings, nil
+}
+
+// batchResult holds the result of processing a single batch
+type batchResult struct {
+	index      int
+	embeddings [][]float32
+	inputCount int
+	err        error
+}
+
+// embedBatchesConcurrent processes batches concurrently with a worker pool
+func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]MultimodalInput, inputs []MultimodalInput, progressCallback func(current, total int), start time.Time) ([][]float32, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	numBatches := len(batches)
+	totalInputs := len(inputs)
+
+	// Results channel and slice for ordered reassembly
+	results := make([]batchResult, numBatches)
+	resultChan := make(chan batchResult, numBatches)
+
+	// Semaphore for limiting concurrent API calls
+	sem := make(chan struct{}, maxConcurrentBatches)
+
+	// WaitGroup for tracking completion
+	var wg sync.WaitGroup
+
+	// Progress tracking
+	var processedInputs int
+	var progressMu sync.Mutex
+
+	log.Printf("  Starting concurrent batch processing with %d workers", maxConcurrentBatches)
+
+	// Launch goroutines for each batch
+	for batchIdx, batch := range batches {
+		wg.Add(1)
+		go func(idx int, b []MultimodalInput) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			select {
+			case <-ctx.Done():
+				resultChan <- batchResult{index: idx, err: ctx.Err()}
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+
+			batchStart := time.Now()
+			embeddings, err := c.callEmbeddingAPI(ctx, b)
+
+			if err != nil {
+				select {
+				case <-ctx.Done():
+					resultChan <- batchResult{index: idx, err: ctx.Err()}
+				default:
+					resultChan <- batchResult{index: idx, err: fmt.Errorf("batch %d: %w", idx+1, err)}
+				}
+				return
+			}
+
+			if len(embeddings) != len(b) {
+				resultChan <- batchResult{
+					index: idx,
+					err:   fmt.Errorf("batch %d: expected %d embeddings, got %d", idx+1, len(b), len(embeddings)),
+				}
+				return
+			}
+
+			log.Printf("  Batch %d/%d completed in %v (%d inputs)", idx+1, numBatches, time.Since(batchStart).Round(time.Millisecond), len(b))
+
+			// Update progress
+			progressMu.Lock()
+			processedInputs += len(b)
+			currentProgress := processedInputs
+			progressMu.Unlock()
+
+			if progressCallback != nil {
+				progressCallback(currentProgress, totalInputs)
+			}
+
+			resultChan <- batchResult{index: idx, embeddings: embeddings, inputCount: len(b)}
+		}(batchIdx, batch)
+	}
+
+	// Wait for all goroutines and close channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	for result := range resultChan {
+		if result.err != nil {
+			cancel() // Cancel in-flight goroutines before returning
+			return nil, result.err
+		}
+		results[result.index] = result
+	}
+
+	// Reassemble in order
+	allEmbeddings := make([][]float32, 0, len(inputs))
+	for _, result := range results {
+		allEmbeddings = append(allEmbeddings, result.embeddings...)
+	}
+
+	log.Printf("Generated %d embeddings in %d concurrent API call(s): %v (avg: %v per embedding)",
+		len(inputs), numBatches, time.Since(start), time.Since(start)/time.Duration(len(inputs)))
 	return allEmbeddings, nil
 }
 

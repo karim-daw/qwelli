@@ -26,6 +26,16 @@ type PDFImage struct {
 	Base64     string // Base64-encoded image data
 }
 
+// Image size thresholds for filtering (shared with chunker)
+const (
+	MinImageWidth  = 500
+	MinImageHeight = 350
+	MinImagePixels = 175_000 // ~1/3 of A4 page minimum
+	MaxImageWidth  = 4000
+	MaxImageHeight = 3000
+	MaxImagePixels = 12_000_000 // 12 million pixels
+)
+
 // ImageExtractor handles extraction of images from PDFs
 type ImageExtractor struct {
 	maxWidth  int
@@ -77,44 +87,54 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 	}
 
 	var images []PDFImage
+	skippedSmall := 0
+	skippedLarge := 0
+
 	for _, entry := range entries {
 		if entry.IsDir() {
-			continue
+			continue // Skip directories
 		}
 
 		imagePath := filepath.Join(tmpDir, entry.Name())
 		imageData, err := os.ReadFile(imagePath)
 		if err != nil {
-			// Log error but continue with other images
-			continue
+			continue // Skip unreadable files
 		}
 
 		// Parse image to get dimensions and format
 		img, format, err := e.parseImage(imageData)
 		if err != nil {
-			// Skip invalid images
-			continue
+			continue // Skip unparseable images
 		}
 
 		// Get dimensions
 		bounds := img.Bounds()
 		width := bounds.Dx()
 		height := bounds.Dy()
+		pixels := width * height
+
+		// Pre-filter: skip images that are too small BEFORE base64 encoding (expensive)
+		if width < MinImageWidth || height < MinImageHeight || pixels < MinImagePixels {
+			skippedSmall++
+			continue // Skip images below minimum dimensions
+		}
+
+		// Pre-filter: skip images that are too large
+		if width > MaxImageWidth || height > MaxImageHeight || pixels > MaxImagePixels {
+			skippedLarge++
+			continue // Skip images above maximum dimensions
+		}
 
 		// Compress image if needed
 		compressedData, err := e.compressImage(imageData, format, width, height)
 		if err != nil {
-			// Use original if compression fails
 			compressedData = imageData
 		}
 
 		// Extract page number from filename (pdfcpu format: page_X_img_Y.ext)
 		pageNumber := e.extractPageNumber(entry.Name())
 
-		// Debug: log filename and extracted page number
-		log.Printf("🖼️  Image filename: %s, extracted page number: %d", entry.Name(), pageNumber)
-
-		// Encode to base64
+		// Now encode to base64 (only for images that passed filters)
 		base64Data := base64.StdEncoding.EncodeToString(compressedData)
 
 		images = append(images, PDFImage{
@@ -125,6 +145,10 @@ func (e *ImageExtractor) ExtractImages(pdfPath string) ([]PDFImage, error) {
 			PageNumber: pageNumber,
 			Base64:     base64Data,
 		})
+	}
+
+	if skippedSmall > 0 || skippedLarge > 0 {
+		log.Printf("  Pre-filtered images: %d too small, %d too large", skippedSmall, skippedLarge)
 	}
 
 	return images, nil
@@ -163,36 +187,44 @@ func (e *ImageExtractor) ExtractImagesByPage(pdfPath string, pageNumber int) ([]
 	var images []PDFImage
 	for _, entry := range entries {
 		if entry.IsDir() {
-			continue
+			continue // Skip directories
 		}
 
 		imagePath := filepath.Join(tmpDir, entry.Name())
 		imageData, err := os.ReadFile(imagePath)
 		if err != nil {
-			// Log error but continue with other images
-			continue
+			continue // Skip unreadable files
 		}
 
 		// Parse image to get dimensions and format
 		img, format, err := e.parseImage(imageData)
 		if err != nil {
-			// Skip invalid images
-			continue
+			continue // Skip unparseable images
 		}
 
 		// Get dimensions
 		bounds := img.Bounds()
 		width := bounds.Dx()
 		height := bounds.Dy()
+		pixels := width * height
+
+		// Pre-filter: skip images that are too small BEFORE base64 encoding
+		if width < MinImageWidth || height < MinImageHeight || pixels < MinImagePixels {
+			continue // Skip images below minimum dimensions
+		}
+
+		// Pre-filter: skip images that are too large
+		if width > MaxImageWidth || height > MaxImageHeight || pixels > MaxImagePixels {
+			continue // Skip images above maximum dimensions
+		}
 
 		// Compress image if needed
 		compressedData, err := e.compressImage(imageData, format, width, height)
 		if err != nil {
-			// Use original if compression fails
 			compressedData = imageData
 		}
 
-		// Encode to base64
+		// Now encode to base64 (only for images that passed filters)
 		base64Data := base64.StdEncoding.EncodeToString(compressedData)
 
 		// Assign the known page number (from the function parameter)
@@ -201,7 +233,7 @@ func (e *ImageExtractor) ExtractImagesByPage(pdfPath string, pageNumber int) ([]
 			Format:     format,
 			Width:      width,
 			Height:     height,
-			PageNumber: pageNumber, // Use the page number we know
+			PageNumber: pageNumber,
 			Base64:     base64Data,
 		})
 	}

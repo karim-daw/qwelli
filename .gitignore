@@ -46,11 +46,11 @@ web/node_modules/
 web/dist/
 web/package-lock.json
 internal/server/web/dist
-internal/server/web/dist/index.html
-internal/server/web/dist/index.html
 
-.claude/settings.local.json
+# Claude Code
+.claude/
 
-nul
-
-qwelli-windows-amd64.zip
+# Build artifacts
+build/
+dist/
+*.zip
