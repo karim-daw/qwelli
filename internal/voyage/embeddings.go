@@ -14,7 +14,7 @@ import (
 // Batch limits for Voyage API
 const (
 	maxInputsPerBatch     = 800    // API max is 1000, using 800 for better throughput
-	maxTokensPerBatch     = 280000 // API max is 320000, leave some headroom
+	maxTokensPerBatch     = 250000 // API max is 320000, ~78% for safe headroom with imprecise token estimation
 	maxTokensPerInput     = 32000
 	pixelsPerImageToken   = 560 // 560 pixels = 1 token for images
 	maxConcurrentBatches  = 3   // Number of parallel API calls
@@ -135,6 +135,9 @@ type batchResult struct {
 
 // embedBatchesConcurrent processes batches concurrently with a worker pool
 func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]MultimodalInput, inputs []MultimodalInput, progressCallback func(current, total int), start time.Time) ([][]float32, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	numBatches := len(batches)
 	totalInputs := len(inputs)
 
@@ -215,6 +218,7 @@ func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]Multimo
 	// Collect results
 	for result := range resultChan {
 		if result.err != nil {
+			cancel() // Cancel in-flight goroutines before returning
 			return nil, result.err
 		}
 		results[result.index] = result

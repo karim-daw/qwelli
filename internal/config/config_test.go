@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -129,9 +130,11 @@ func TestSave_CreatesFile(t *testing.T) {
 		t.Fatalf("Failed to stat config file: %v", err)
 	}
 
-	mode := info.Mode()
-	if mode.Perm() != 0600 {
-		t.Errorf("Expected file permissions 0600, got %o", mode.Perm())
+	if runtime.GOOS != "windows" {
+		mode := info.Mode()
+		if mode.Perm() != 0600 {
+			t.Errorf("Expected file permissions 0600, got %o", mode.Perm())
+		}
 	}
 }
 

@@ -25,9 +25,9 @@ func NewPDFChunkStrategy(metadata *extraction.PDFMetadata, filePath string) *PDF
 	}
 }
 
-// minTokensForTextPage is the minimum tokens a page needs to be considered text-worthy.
+// MinTokensForTextPage is the minimum tokens a page needs to be considered text-worthy.
 // Pages with fewer tokens are assumed to be image-heavy and their sparse text is skipped.
-const minTokensForTextPage = 30
+const MinTokensForTextPage = 30
 
 func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, baseMetadata map[string]interface{}) ([]Chunk, error) {
 	pages, ok := content.([]extraction.PDFPage)
@@ -50,7 +50,7 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 		// Skip text-sparse pages (likely image-only pages with captions/headers)
 		// These pages typically have scattered text that doesn't add search value
 		pageTokens := textutil.EstimateTokens(trimmedText)
-		if pageTokens < minTokensForTextPage {
+		if pageTokens < MinTokensForTextPage {
 			skippedSparsePages++
 			continue
 		}
@@ -106,7 +106,7 @@ func (s *PDFChunkStrategy) Chunkify(content interface{}, config ChunkerConfig, b
 
 	// Log skipped sparse pages
 	if skippedSparsePages > 0 {
-		log.Printf("  Skipped %d text-sparse pages (< %d tokens)", skippedSparsePages, minTokensForTextPage)
+		log.Printf("  Skipped %d text-sparse pages (< %d tokens)", skippedSparsePages, MinTokensForTextPage)
 	}
 
 	// If no text extracted, return single empty chunk

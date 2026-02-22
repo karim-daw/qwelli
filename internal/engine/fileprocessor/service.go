@@ -236,13 +236,12 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 	if options.ContentTypeMode != ContentTypeText {
 		// Separate pages into text-rich and sparse-text (image-heavy) pages
 		// Sparse pages get rendered as full-page images (faster than extracting individual images)
-		const minTokensForTextPage = 30
 		var textRichPages []int
 		var sparseTextPages []int
 
 		for _, page := range pages {
 			tokens := textutil.EstimateTokens(strings.TrimSpace(page.Text))
-			if tokens >= minTokensForTextPage {
+			if tokens >= chunker.MinTokensForTextPage {
 				textRichPages = append(textRichPages, page.PageNumber)
 			} else if tokens > 0 || len(pages) <= 3 {
 				// Include sparse pages only if they have some text or PDF is small
@@ -252,7 +251,7 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 
 		// For sparse-text pages, try page rendering first (much faster)
 		if len(sparseTextPages) > 0 && s.pageRenderer.IsAvailable() {
-			log.Printf("  Rendering %d image-heavy pages (< %d tokens)", len(sparseTextPages), minTokensForTextPage)
+			log.Printf("  Rendering %d image-heavy pages (< %d tokens)", len(sparseTextPages), chunker.MinTokensForTextPage)
 			renderedImages, err := s.pageRenderer.RenderPagesParallel(file.Path, sparseTextPages, s.numPDFWorkers)
 			if err != nil {
 				log.Printf("⚠️  Page rendering failed, falling back to image extraction: %v", err)
