@@ -60,7 +60,7 @@ if errorlevel 1 (
 )
 
 REM Check for DuckDB libraries
-set "LIB_DIR=%~dp0build\libs"
+set "LIB_DIR=%~dp0..\build\libs"
 if not exist "!LIB_DIR!\duckdb.dll" (
     echo DuckDB libraries not found. Please run download-duckdb.bat first.
     exit /b 1
