@@ -54,9 +54,36 @@ CLI/Server → Service → Engine → DB
 - `search.SearchStrategy` — interface for search implementations (`semantic`, `keyword`, `hybrid` via RRF fusion).
 - `fileprocessor.FileProcessingService` — unified file processor that dispatches by type (text, PDF, image).
 
-### Web UI Embedding
+### Web UI Architecture
 
 The React frontend (`web/`) is built to `web/dist/`, copied to `internal/server/web/dist/`, and embedded in the Go binary via `//go:embed`. The server serves it as static files at the root route.
+
+Uses **shadcn/ui** (Radix primitives + Tailwind CSS), **sonner** for toasts, and **react-pdf** for PDF preview.
+
+```
+web/src/
+  api/          # Typed fetch wrapper (client.ts) + per-feature modules
+  types/        # TypeScript interfaces mirroring server/types.go
+  contexts/     # AppContext (indexes, viewMode) + SearchContext (query, results, recent searches)
+  hooks/        # useTheme, useSSE, useResizable, useSearch, useIndexProgress, etc.
+  components/
+    ui/         # shadcn/ui generated components (Button, Dialog, Card, etc.)
+    layout/     # AppLayout, Sidebar, TopBar, MainContent
+    search/     # SearchForm, SearchResults, ResultCard, RecentSearches
+    status/     # StatusView, StatusSummaryGrid, FileChangeList
+    modals/     # NewIndexDialog, IndexProgressModal, FullTextModal, PDFPreviewModal
+    screens/    # SetupScreen, QuitScreen
+    terminal/   # TerminalPanel
+  lib/          # cn() utility, format helpers
+  App.tsx       # Slim provider shell (~40 lines)
+```
+
+**Key patterns:**
+- **Contexts** use plain `useState` with setter functions exposed via context — no `useReducer`.
+- **Theme** uses Tailwind `dark:` variants and CSS variable classes (`bg-background`, `text-foreground`, `bg-muted`, etc.) instead of runtime `isDark` conditionals. The `.dark` class is toggled on `<html>` by `useTheme`.
+- **Search caching** — recent searches are stored in `SearchContext` (backed by localStorage, keyed by index path). This ensures a single shared state across all components.
+- **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support.
+- **Modals** — `FullTextModal` and `NewIndexDialog` use shadcn `Dialog`. `PDFPreviewModal` uses a plain overlay (shadcn Dialog's base classes conflict with the full-height flex layout needed for the PDF viewer).
 
 ### Server Patterns
 
@@ -94,6 +121,15 @@ Environment variables override `~/.qwelli/config.yaml` values.
 1. Create `internal/cli/newcmd.go` with `NewNewcmdCmd()` returning `*cobra.Command`
 2. Register in `cmd/qwelli/main.go` via `rootCmd.AddCommand()`
 
+## Adding a New Frontend Component
+
+1. Create the component in the appropriate `web/src/components/` subdirectory
+2. Use shadcn/ui primitives (`Button`, `Card`, `Dialog`, etc.) — don't hand-roll HTML equivalents
+3. Use CSS variable classes for theming (`bg-background`, `text-muted-foreground`, `dark:text-red-400`) — never `isDark` ternaries
+4. For API calls, add a function in the relevant `web/src/api/` module, not inline `fetch()`
+5. For shared state, use `useAppContext()` or `useSearchContext()` — not prop drilling
+6. Run `cd web && npx tsc --noEmit && npm run build` to verify
+
 ## Adding a New API Endpoint
 
 1. Add handler in `internal/server/handler_*.go`
@@ -112,3 +148,7 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - HNSW index must be rebuilt after embedding changes (`BuildHNSWIndexIfNeeded` or `RebuildHNSWIndex`).
 - Changing the embedding model requires re-creating the database (dimension is fixed at creation time). The service layer detects this automatically via `handleModelChange()`.
 - Files >500KB are skipped. OneDrive placeholder files are detected and skipped.
+- Never use `alert()` or `confirm()` in the frontend — use `toast` (sonner) and `AlertDialog` (shadcn).
+- Never add `isDark` ternaries — use Tailwind `dark:` variants and CSS variable classes.
+- API calls go in `web/src/api/` modules, not inline in components.
+- Shared state goes in contexts, not prop-drilled through intermediate components.

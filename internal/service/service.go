@@ -76,6 +76,82 @@ func (s *Service) Engine() *engine.Engine            { return s.engine }
 func (s *Service) VoyageClient() voyage.ClientInterface { return s.voyageClient }
 func (s *Service) Config() *config.Config            { return s.config }
 
+// ConfigUpdate holds optional config field updates. Nil means "keep current".
+type ConfigUpdate struct {
+	APIKey   *string
+	Model    *string
+	Endpoint *string
+}
+
+// UpdateConfig applies non-nil fields to the config, saves to disk,
+// and reconstructs the Voyage client and engine if connection settings changed.
+// Returns warnings (e.g., model change) and any error.
+func (s *Service) UpdateConfig(update ConfigUpdate) ([]string, error) {
+	cfg := s.config
+	var warnings []string
+	changed := false
+
+	if update.APIKey != nil && *update.APIKey != cfg.APIKey {
+		if *update.APIKey == "" {
+			return nil, fmt.Errorf("API key cannot be empty")
+		}
+		cfg.APIKey = *update.APIKey
+		changed = true
+	}
+
+	oldModel := cfg.Model
+	if update.Model != nil && *update.Model != cfg.Model {
+		cfg.Model = *update.Model
+		changed = true
+	}
+
+	if update.Endpoint != nil && *update.Endpoint != cfg.Endpoint {
+		cfg.Endpoint = *update.Endpoint
+		changed = true
+	}
+
+	if !changed {
+		return nil, nil
+	}
+
+	if err := cfg.Save(); err != nil {
+		return nil, fmt.Errorf("save config: %w", err)
+	}
+
+	// Reconstruct Voyage client with updated settings
+	client, err := voyage.NewClient(voyage.ClientConfig{
+		APIKey:            cfg.APIKey,
+		EmbeddingModel:    cfg.Model,
+		EmbeddingEndpoint: cfg.Endpoint,
+		RerankModel:       cfg.RerankModel,
+		RerankEndpoint:    cfg.RerankEndpoint,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create voyage client: %w", err)
+	}
+	s.voyageClient = client
+
+	// Reconstruct engine with updated client
+	eng := engine.NewEngine(client, cfg.EnableMultimodal)
+	fileWorkers := cfg.ParallelWorkers
+	if fileWorkers <= 0 {
+		fileWorkers = config.DefaultWorkerCount()
+	}
+	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers)
+	pdfWorkers := cfg.ParallelPDFWorkers
+	if pdfWorkers <= 0 {
+		pdfWorkers = config.DefaultWorkerCount()
+	}
+	eng.SetParallelPDFProcessing(cfg.EnableParallelPDF, pdfWorkers)
+	s.engine = eng
+
+	if update.Model != nil && *update.Model != oldModel && oldModel != "" {
+		warnings = append(warnings, "Embedding model changed. Existing indexes may need to be re-created.")
+	}
+
+	return warnings, nil
+}
+
 // GenerateDBPath returns the database file path for a given folder.
 func (s *Service) GenerateDBPath(folderPath string) (string, error) {
 	abs, err := filepath.Abs(folderPath)

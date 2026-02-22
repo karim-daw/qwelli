@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -17,8 +18,9 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	service *service.Service
-	port    int
+	service  *service.Service
+	port     int
+	listener net.Listener
 
 	// HTTP server for graceful shutdown
 	httpServer *http.Server
@@ -52,6 +54,18 @@ func NewServer(svc *service.Service, port int) *Server {
 	return s
 }
 
+// Listen binds to the preferred port (or falls back to an available one).
+// It stores the listener and updates the port. Call this before Start().
+func (s *Server) Listen(portExplicit bool) (int, error) {
+	ln, actualPort, err := ResolveListener(s.port, portExplicit)
+	if err != nil {
+		return 0, err
+	}
+	s.listener = ln
+	s.port = actualPort
+	return actualPort, nil
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -65,6 +79,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/index/progress", s.handleIndexProgress)
 	mux.HandleFunc("/api/index/cancel", s.handleCancelIndex)
 	mux.HandleFunc("/api/index/delete", s.handleDeleteIndex)
+	mux.HandleFunc("/api/config", s.handleGetConfig)
+	mux.HandleFunc("/api/config/update", s.handleUpdateConfig)
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
 	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
 	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
@@ -99,6 +115,9 @@ func (s *Server) Start() error {
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: s.corsMiddleware(mux),
+	}
+	if s.listener != nil {
+		return s.httpServer.Serve(s.listener)
 	}
 	return s.httpServer.ListenAndServe()
 }
