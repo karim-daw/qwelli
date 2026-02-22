@@ -28,10 +28,12 @@ type Config struct {
 	RerankEndpoint   string `yaml:"rerank_endpoint"`   // Custom reranker endpoint (optional)
 
 	// Parallel processing settings
-	EnableParallel     bool `yaml:"enable_parallel"`      // Enable parallel file processing (default: true)
-	ParallelWorkers    int  `yaml:"parallel_workers"`      // Number of file processing workers (0 = auto: ~90% of CPU cores)
-	EnableParallelPDF  bool `yaml:"enable_parallel_pdf"`   // Enable parallel PDF page processing (default: true)
-	ParallelPDFWorkers int  `yaml:"parallel_pdf_workers"`  // Number of PDF page workers (0 = auto: ~90% of CPU cores)
+	EnableParallel          bool `yaml:"enable_parallel"`           // Enable parallel file processing (default: true)
+	ParallelWorkers         int  `yaml:"parallel_workers"`          // Number of file processing workers (0 = auto: ~90% of CPU cores)
+	EnableParallelPDF       bool `yaml:"enable_parallel_pdf"`       // Enable parallel PDF page processing (default: true)
+	ParallelPDFWorkers      int  `yaml:"parallel_pdf_workers"`      // Number of PDF page workers (0 = auto: ~90% of CPU cores)
+	MaxConcurrentEmbeddings int  `yaml:"max_concurrent_embeddings"` // Max parallel embedding API calls (default: 5)
+	EnableStreamingPipeline bool `yaml:"enable_streaming_pipeline"` // Overlap processing and embedding phases (default: true)
 
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
@@ -52,10 +54,12 @@ func DefaultConfig() *Config {
 		RerankProvider:     "voyage",
 		RerankModel:        os.Getenv("VOYAGE_RERANK_MODEL"),
 		RerankEndpoint:     os.Getenv("VOYAGE_RERANK_ENDPOINT"),
-		EnableParallel:     true, // Parallel file processing enabled by default
-		ParallelWorkers:    0,    // 0 = auto-detect (~90% of CPU cores)
-		EnableParallelPDF:  true, // Parallel PDF page processing enabled by default
-		ParallelPDFWorkers: 0,    // 0 = auto-detect (~90% of CPU cores)
+		EnableParallel:          true, // Parallel file processing enabled by default
+		ParallelWorkers:         0,    // 0 = auto-detect (~90% of CPU cores)
+		EnableParallelPDF:       true, // Parallel PDF page processing enabled by default
+		ParallelPDFWorkers:      0,    // 0 = auto-detect (~90% of CPU cores)
+		MaxConcurrentEmbeddings: 5,    // Max parallel embedding API calls
+		EnableStreamingPipeline: true, // Overlap processing and embedding phases
 		IndexDir:           filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
@@ -115,6 +119,12 @@ func Load(path ...string) (*Config, error) {
 	}
 	if val := os.Getenv("ENABLE_RERANKER"); val != "" {
 		cfg.EnableReranker = val == "true" || val == "1" || val == "yes"
+	}
+	if val := os.Getenv("MAX_CONCURRENT_EMBEDDINGS"); val != "" {
+		var n int
+		if _, err := fmt.Sscanf(val, "%d", &n); err == nil && n > 0 {
+			cfg.MaxConcurrentEmbeddings = n
+		}
 	}
 
 	return &cfg, nil

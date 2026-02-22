@@ -33,12 +33,14 @@ type SearchResult struct {
 // Engine contains the core business logic for indexing and search.
 // It does NOT manage database connections — callers provide *db.ProjectDB.
 type Engine struct {
-	voyageClient          voyage.ClientInterface
-	enableMultimodal      bool
-	contentTypeMode       fileprocessor.ContentTypeMode
-	fileProcessingService *fileprocessor.FileProcessingService
-	enableParallel        bool
-	numWorkers            int
+	voyageClient            voyage.ClientInterface
+	enableMultimodal        bool
+	contentTypeMode         fileprocessor.ContentTypeMode
+	fileProcessingService   *fileprocessor.FileProcessingService
+	enableParallel          bool
+	numWorkers              int
+	enableStreamingPipeline bool
+	maxConcurrentEmbeddings int
 }
 
 func NewEngine(voyageClient voyage.ClientInterface, enableMultimodal bool) *Engine {
@@ -65,6 +67,13 @@ func (e *Engine) SetParallelProcessing(enabled bool, numWorkers int) {
 // Useful for large PDFs with many pages. Set numWorkers to 0 for auto-detect.
 func (e *Engine) SetParallelPDFProcessing(enabled bool, numWorkers int) {
 	e.fileProcessingService.SetParallelPDFProcessing(enabled, numWorkers)
+}
+
+// SetStreamingPipeline enables or disables the streaming pipeline that overlaps
+// file processing, embedding, and storage phases.
+func (e *Engine) SetStreamingPipeline(enabled bool, maxConcurrentEmbeddings int) {
+	e.enableStreamingPipeline = enabled
+	e.maxConcurrentEmbeddings = maxConcurrentEmbeddings
 }
 
 func (e *Engine) SetContentTypeMode(mode fileprocessor.ContentTypeMode) {
@@ -118,7 +127,58 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 		return err
 	}
 
-	// Process files into chunks
+	prevEmbeddingCount, _ := projectDB.CountEmbeddings()
+
+	// Use streaming pipeline if enabled (overlaps processing, embedding, and storage)
+	if e.enableStreamingPipeline && e.enableParallel {
+		log.Printf("⚡ Indexing %d files via streaming pipeline (workers=%d, embed_concurrency=%d, CPUs=%d)",
+			len(filesToProcess), e.numWorkers, e.maxConcurrentEmbeddings, runtime.NumCPU())
+
+		totalChunks, skipped, onedriveSkipped, pipelineErr := e.indexFolderStreaming(
+			ctx, projectDB, filesToProcess, e.maxConcurrentEmbeddings, progressCb, emitPhase,
+		)
+		if pipelineErr != nil {
+			return pipelineErr
+		}
+
+		ok := len(filesToProcess) - skipped
+		hasNewEmbeddings := totalChunks > 0
+
+		// Rebuild HNSW index
+		if needsRebuild {
+			log.Printf("🔨 Rebuilding HNSW index (after file deletions)...")
+			emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
+			start := time.Now()
+			if err := projectDB.RebuildHNSWIndex(); err != nil {
+				return fmt.Errorf("rebuild HNSW index: %w", err)
+			}
+			log.Printf("✅ HNSW index rebuilt in %v", time.Since(start))
+			emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
+		} else if hasNewEmbeddings {
+			emitPhase("hnsw", "Rebuilding HNSW index", 0, 1)
+			start := time.Now()
+			rebuilt, err := projectDB.BuildHNSWIndexIfNeeded(prevEmbeddingCount)
+			if err != nil {
+				return fmt.Errorf("rebuild HNSW index: %w", err)
+			}
+			if rebuilt {
+				log.Printf("🔨 Rebuilding HNSW index...")
+				log.Printf("✅ HNSW index rebuilt in %v", time.Since(start))
+			} else if projectDB.IsHNSWStale() {
+				log.Printf("⏳ HNSW rebuild deferred (small incremental update)")
+			}
+			emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
+		}
+
+		emitPhase("complete", fmt.Sprintf("Processed %d files successfully", ok), ok, len(filesToProcess))
+		log.Printf("📊 Indexing: %d processed, %d skipped", ok, skipped)
+		if onedriveSkipped > 0 {
+			log.Printf("💡 %d OneDrive placeholder files skipped", onedriveSkipped)
+		}
+		return nil
+	}
+
+	// Sequential fallback: process → embed → store
 	log.Printf("⚡ Indexing %d files (parallel=%v, workers=%d, CPUs=%d)",
 		len(filesToProcess), e.enableParallel, e.numWorkers, runtime.NumCPU())
 
@@ -131,12 +191,10 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 	}
 
 	// Embed & store
-	var prevEmbeddingCount int
 	if len(allChunks) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		prevEmbeddingCount, _ = projectDB.CountEmbeddings()
 		embedder, err := embeddings.NewEmbedder(e.voyageClient)
 		if err != nil {
 			return err
@@ -168,6 +226,8 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 		if rebuilt {
 			log.Printf("🔨 Rebuilding HNSW index...")
 			log.Printf("✅ HNSW index rebuilt in %v", time.Since(start))
+		} else if projectDB.IsHNSWStale() {
+			log.Printf("⏳ HNSW rebuild deferred (small incremental update)")
 		}
 		emitPhase("hnsw", "HNSW index rebuilt", 1, 1)
 	}
@@ -316,6 +376,7 @@ func (e *Engine) embedAndStore(ctx context.Context, projectDB *db.ProjectDB, emb
 	}
 
 	gen := embeddings.NewEmbeddingGenerator(embedder, e.enableMultimodal)
+	gen.SetCache(projectDB)
 	embMap, err := gen.GenerateEmbeddings(ctx, chunks, embCb)
 	if err != nil {
 		if ctx.Err() != nil {

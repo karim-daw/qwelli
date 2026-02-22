@@ -44,11 +44,11 @@ func (e *Engine) processFilesParallel(ctx context.Context, projectDB *db.Project
 
 	// Result collection: accumulate files and chunks for batch append (Appender is not thread-safe)
 	var (
-		allFiles       []db.File
-		allChunks      []db.Chunk
-		skipped        int
+		allFiles        = make([]db.File, 0, len(files))
+		allChunks       = make([]db.Chunk, 0, len(files)*5) // ~5 chunks per file estimate
+		skipped         int
 		onedriveSkipped int
-		mu             sync.Mutex // Protects allFiles, allChunks, skipped, onedriveSkipped
+		mu              sync.Mutex // Protects allFiles, allChunks, skipped, onedriveSkipped
 	)
 
 	// Atomic counter for progress reporting

@@ -13,11 +13,10 @@ import (
 
 // Batch limits for Voyage API
 const (
-	maxInputsPerBatch     = 800    // API max is 1000, using 800 for better throughput
-	maxTokensPerBatch     = 250000 // API max is 320000, ~78% for safe headroom with imprecise token estimation
-	maxTokensPerInput     = 32000
-	pixelsPerImageToken   = 560 // 560 pixels = 1 token for images
-	maxConcurrentBatches  = 3   // Number of parallel API calls
+	maxInputsPerBatch   = 950    // API max is 1000, using 950 for near-full batches
+	maxTokensPerBatch   = 200000 // API max is 320000, ~63% to account for image token underestimation
+	maxTokensPerInput   = 32000
+	pixelsPerImageToken = 560 // 560 pixels = 1 token for images
 )
 
 // Embed generates an embedding for a single text
@@ -60,10 +59,10 @@ func (c *Client) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput, 
 
 	// Create batches that respect Voyage API limits
 	batches := c.createMultimodalBatches(inputs)
-	log.Printf("  Split %d inputs into %d batch(es), processing up to %d concurrently", len(inputs), len(batches), maxConcurrentBatches)
+	log.Printf("  Split %d inputs into %d batch(es), processing up to %d concurrently", len(inputs), len(batches), c.maxConcurrentBatches)
 
-	// For small number of batches, use sequential processing
-	if len(batches) <= 2 {
+	// For a single batch, use sequential processing (no overhead)
+	if len(batches) <= 1 {
 		return c.embedBatchesSequential(ctx, batches, inputs, progressCallback, start)
 	}
 
@@ -146,7 +145,7 @@ func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]Multimo
 	resultChan := make(chan batchResult, numBatches)
 
 	// Semaphore for limiting concurrent API calls
-	sem := make(chan struct{}, maxConcurrentBatches)
+	sem := make(chan struct{}, c.maxConcurrentBatches)
 
 	// WaitGroup for tracking completion
 	var wg sync.WaitGroup
@@ -155,7 +154,7 @@ func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]Multimo
 	var processedInputs int
 	var progressMu sync.Mutex
 
-	log.Printf("  Starting concurrent batch processing with %d workers", maxConcurrentBatches)
+	log.Printf("  Starting concurrent batch processing with %d workers", c.maxConcurrentBatches)
 
 	// Launch goroutines for each batch
 	for batchIdx, batch := range batches {
@@ -237,8 +236,10 @@ func (c *Client) embedBatchesConcurrent(ctx context.Context, batches [][]Multimo
 
 // createMultimodalBatches groups inputs into batches respecting Voyage API limits
 func (c *Client) createMultimodalBatches(inputs []MultimodalInput) [][]MultimodalInput {
-	batches := [][]MultimodalInput{}
-	currentBatch := []MultimodalInput{}
+	// Estimate number of batches: at least 1, roughly inputs/maxInputsPerBatch
+	estimatedBatches := len(inputs)/maxInputsPerBatch + 1
+	batches := make([][]MultimodalInput, 0, estimatedBatches)
+	currentBatch := make([]MultimodalInput, 0, maxInputsPerBatch)
 	currentTokens := 0
 
 	for _, input := range inputs {
@@ -266,7 +267,7 @@ func (c *Client) createMultimodalBatches(inputs []MultimodalInput) [][]Multimoda
 		if len(currentBatch) >= maxInputsPerBatch ||
 			(currentTokens+inputTokens > maxTokensPerBatch && len(currentBatch) > 0) {
 			batches = append(batches, currentBatch)
-			currentBatch = []MultimodalInput{}
+			currentBatch = make([]MultimodalInput, 0, maxInputsPerBatch)
 			currentTokens = 0
 		}
 

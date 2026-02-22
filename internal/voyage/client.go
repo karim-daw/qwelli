@@ -25,6 +25,9 @@ const (
 	DefaultEmbeddingTimeout = 180 * time.Second // Longer for large batch operations
 	DefaultRerankTimeout    = 30 * time.Second  // Shorter for quick reranking
 
+	// Concurrency settings
+	DefaultMaxConcurrentBatches = 5
+
 	// Retry settings
 	MaxRetries = 3
 )
@@ -37,6 +40,9 @@ type ClientConfig struct {
 	EmbeddingModel    string
 	EmbeddingEndpoint string
 	EmbeddingTimeout  time.Duration
+
+	// Concurrency settings
+	MaxConcurrentBatches int // Max parallel embedding API calls (default: 5)
 
 	// Rerank settings
 	RerankModel    string
@@ -52,6 +58,9 @@ type Client struct {
 	embeddingModel    string
 	embeddingEndpoint string
 	embeddingClient   *http.Client
+
+	// Concurrency settings
+	maxConcurrentBatches int
 
 	// Rerank settings
 	rerankModel    string
@@ -84,6 +93,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.RerankTimeout == 0 {
 		cfg.RerankTimeout = DefaultRerankTimeout
 	}
+	if cfg.MaxConcurrentBatches <= 0 {
+		cfg.MaxConcurrentBatches = DefaultMaxConcurrentBatches
+	}
 
 	client := &Client{
 		apiKey:            cfg.APIKey,
@@ -92,8 +104,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		embeddingClient: &http.Client{
 			Timeout: cfg.EmbeddingTimeout,
 		},
-		rerankModel:    cfg.RerankModel,
-		rerankEndpoint: cfg.RerankEndpoint,
+		maxConcurrentBatches: cfg.MaxConcurrentBatches,
+		rerankModel:          cfg.RerankModel,
+		rerankEndpoint:       cfg.RerankEndpoint,
 		rerankClient: &http.Client{
 			Timeout: cfg.RerankTimeout,
 		},

@@ -35,6 +35,11 @@ func buildSchema(dimension int) []string {
 			key TEXT PRIMARY KEY,
 			value TEXT
 		)`,
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS embedding_cache (
+			content_hash TEXT PRIMARY KEY,
+			vector FLOAT[%d] NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`, dimension),
 		fmt.Sprintf(`INSERT OR REPLACE INTO metadata (key, value) VALUES ('dimension', '%d')`, dimension),
 		`INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '2')`,
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 )
@@ -277,4 +279,118 @@ func intSliceToInt64(arr []int) []int64 {
 		out[i] = int64(v)
 	}
 	return out
+}
+
+// CacheEntry represents a single embedding cache entry.
+type CacheEntry struct {
+	ContentHash string
+	Vector      []float32
+}
+
+// LookupEmbeddingCache does a batch lookup of content hashes in the embedding_cache table.
+// Returns a map of content_hash → vector for any hits found.
+func (p *ProjectDB) LookupEmbeddingCache(hashes []string) (map[string][]float32, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[string][]float32, len(hashes))
+	const batchSize = 500
+
+	for i := 0; i < len(hashes); i += batchSize {
+		end := i + batchSize
+		if end > len(hashes) {
+			end = len(hashes)
+		}
+		batch := hashes[i:end]
+
+		// Build placeholders: $1, $2, ...
+		placeholders := make([]string, len(batch))
+		args := make([]interface{}, len(batch))
+		for j, h := range batch {
+			placeholders[j] = fmt.Sprintf("$%d", j+1)
+			args[j] = h
+		}
+
+		query := fmt.Sprintf(
+			"SELECT content_hash, vector FROM embedding_cache WHERE content_hash IN (%s)",
+			strings.Join(placeholders, ", "),
+		)
+
+		rows, err := p.conn.Query(query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("lookup embedding cache: %w", err)
+		}
+
+		for rows.Next() {
+			var hash string
+			var vecIface interface{}
+			if err := rows.Scan(&hash, &vecIface); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan embedding cache: %w", err)
+			}
+			vec := parseVector(vecIface)
+			if vec != nil {
+				result[hash] = vec
+			}
+		}
+		rows.Close()
+	}
+
+	return result, nil
+}
+
+// parseVector converts DuckDB FLOAT[] return values to []float32.
+// DuckDB may return []float32, []float64, or []interface{}.
+func parseVector(iface interface{}) []float32 {
+	switch v := iface.(type) {
+	case []float32:
+		return v
+	case []float64:
+		return Float64ToFloat32(v)
+	case []interface{}:
+		out := make([]float32, 0, len(v))
+		for _, item := range v {
+			switch n := item.(type) {
+			case float32:
+				out = append(out, n)
+			case float64:
+				out = append(out, float32(n))
+			default:
+				return nil
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// StoreEmbeddingCache bulk-inserts embedding cache entries, skipping duplicates.
+// Uses INSERT OR IGNORE to handle duplicate content hashes gracefully.
+func (p *ProjectDB) StoreEmbeddingCache(entries []CacheEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Deduplicate entries by content hash (same batch may have identical chunks)
+	seen := make(map[string]struct{}, len(entries))
+	unique := make([]CacheEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, exists := seen[e.ContentHash]; !exists {
+			seen[e.ContentHash] = struct{}{}
+			unique = append(unique, e)
+		}
+	}
+
+	for _, e := range unique {
+		_, err := p.conn.Exec(
+			`INSERT OR IGNORE INTO embedding_cache (content_hash, vector, created_at) VALUES ($1, $2, $3)`,
+			e.ContentHash, e.Vector, time.Now(),
+		)
+		if err != nil {
+			return fmt.Errorf("insert embedding cache: %w", err)
+		}
+	}
+	return nil
 }

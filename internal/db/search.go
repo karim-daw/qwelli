@@ -4,6 +4,14 @@ import (
 	"fmt"
 )
 
+// ensureHNSWPersistence re-applies the hnsw_enable_experimental_persistence setting
+// on the current connection. This is necessary because database/sql may use a pooled
+// connection that never received the session-level SET from OpenProjectDB.
+func (p *ProjectDB) ensureHNSWPersistence() error {
+	_, err := p.conn.Exec("SET hnsw_enable_experimental_persistence = true")
+	return err
+}
+
 // BuildHNSWIndex creates the HNSW index if embeddings exist
 func (p *ProjectDB) BuildHNSWIndex() error {
 	var count int
@@ -13,11 +21,14 @@ func (p *ProjectDB) BuildHNSWIndex() error {
 	if count == 0 {
 		return nil
 	}
+	if err := p.ensureHNSWPersistence(); err != nil {
+		return fmt.Errorf("ensure HNSW persistence: %w", err)
+	}
 	_, err := p.conn.Exec(`CREATE INDEX IF NOT EXISTS hnsw_idx ON embeddings USING HNSW (vector) WITH (metric = 'cosine')`)
 	return err
 }
 
-// RebuildHNSWIndex drops and recreates the HNSW index
+// RebuildHNSWIndex drops and recreates the HNSW index, clearing any stale flag.
 func (p *ProjectDB) RebuildHNSWIndex() error {
 	if _, err := p.conn.Exec("DROP INDEX IF EXISTS hnsw_idx"); err != nil {
 		return fmt.Errorf("drop HNSW index: %w", err)
@@ -27,16 +38,22 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 		return fmt.Errorf("check embeddings: %w", err)
 	}
 	if count == 0 {
+		_ = p.SetMetadata("hnsw_stale", "false")
 		return nil
+	}
+	if err := p.ensureHNSWPersistence(); err != nil {
+		return fmt.Errorf("ensure HNSW persistence: %w", err)
 	}
 	if _, err := p.conn.Exec(`CREATE INDEX hnsw_idx ON embeddings USING HNSW(vector) WITH (metric='cosine')`); err != nil {
 		return fmt.Errorf("create HNSW index: %w", err)
 	}
+	_ = p.SetMetadata("hnsw_stale", "false")
 	return nil
 }
 
 // BuildHNSWIndexIfNeeded rebuilds the HNSW index only if new embeddings were added since prevCount.
-// Skips the expensive rebuild when an incremental run added zero new embeddings (no-op).
+// For small incremental updates (<5% of total when total >1000), defers the rebuild by marking
+// the index as stale. This saves 10-30 seconds on small incremental updates.
 // Returns true if a rebuild was performed.
 func (p *ProjectDB) BuildHNSWIndexIfNeeded(prevCount int) (rebuilt bool, err error) {
 	current, err := p.CountEmbeddings()
@@ -46,9 +63,45 @@ func (p *ProjectDB) BuildHNSWIndexIfNeeded(prevCount int) (rebuilt bool, err err
 	if current == prevCount {
 		return false, nil // No new embeddings, skip rebuild
 	}
+
+	newEmbeddings := current - prevCount
+	changeRatio := float64(newEmbeddings) / float64(current)
+
+	// Defer rebuild for small incremental updates
+	if current > 1000 && changeRatio < 0.05 {
+		if err := p.SetMetadata("hnsw_stale", "true"); err != nil {
+			return false, fmt.Errorf("set hnsw_stale: %w", err)
+		}
+		return false, nil
+	}
+
+	// Clear stale flag and rebuild
 	if err := p.RebuildHNSWIndex(); err != nil {
 		return false, err
 	}
+	_ = p.SetMetadata("hnsw_stale", "false")
+	return true, nil
+}
+
+// IsHNSWStale returns true if the HNSW index has deferred updates pending.
+func (p *ProjectDB) IsHNSWStale() bool {
+	val, err := p.GetMetadata("hnsw_stale")
+	if err != nil {
+		return false
+	}
+	return val == "true"
+}
+
+// ForceRebuildHNSWIfStale rebuilds the HNSW index if it's marked as stale.
+// Used during full re-indexes to ensure the index is up to date.
+func (p *ProjectDB) ForceRebuildHNSWIfStale() (bool, error) {
+	if !p.IsHNSWStale() {
+		return false, nil
+	}
+	if err := p.RebuildHNSWIndex(); err != nil {
+		return false, err
+	}
+	_ = p.SetMetadata("hnsw_stale", "false")
 	return true, nil
 }
 
