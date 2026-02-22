@@ -270,6 +270,7 @@ func (e *Engine) processFilesToChannel(
 		fileMu  sync.Mutex
 	)
 	fileBuf = make([]db.File, 0, len(files))
+	seen := make(map[string]bool, len(files))
 
 	for w := 0; w < numWorkers; w++ {
 		wg.Add(1)
@@ -302,8 +303,13 @@ func (e *Engine) processFilesToChannel(
 					continue
 				}
 
-				// Buffer the file for batch insert
+				// Deduplicate by file_id (symlinks/junctions can resolve to same path)
 				fileMu.Lock()
+				if seen[result.file.FileID] {
+					fileMu.Unlock()
+					continue
+				}
+				seen[result.file.FileID] = true
 				fileBuf = append(fileBuf, result.file)
 				fileMu.Unlock()
 
@@ -339,7 +345,7 @@ func (e *Engine) processFilesToChannel(
 	toInsert := fileBuf
 	fileMu.Unlock()
 
-	if len(toInsert) > 0 {
+	if len(toInsert) > 0 && ctx.Err() == nil {
 		start := time.Now()
 		if err := projectDB.AppendFiles(toInsert); err != nil {
 			log.Printf("⚠️  Bulk insert files failed: %v", err)
