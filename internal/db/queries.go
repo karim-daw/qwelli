@@ -92,6 +92,22 @@ func (p *ProjectDB) GetAllFiles() ([]File, error) {
 	return files, nil
 }
 
+// ClearAllData removes all files, chunks, and embeddings for a full re-index.
+// The HNSW index is also dropped since all embeddings are deleted.
+func (p *ProjectDB) ClearAllData() error {
+	for _, q := range []string{
+		"DROP INDEX IF EXISTS hnsw_idx",
+		"DELETE FROM embeddings",
+		"DELETE FROM chunks",
+		"DELETE FROM files",
+	} {
+		if _, err := p.conn.Exec(q); err != nil {
+			return fmt.Errorf("clear data (%s): %w", q, err)
+		}
+	}
+	return nil
+}
+
 // DeleteFile deletes a file and all associated chunks and embeddings
 func (p *ProjectDB) DeleteFile(fileID string) error {
 	tx, err := p.conn.Begin()

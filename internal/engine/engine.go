@@ -127,6 +127,18 @@ func (e *Engine) IndexFolder(ctx context.Context, projectDB *db.ProjectDB, folde
 		return err
 	}
 
+	// For full (non-incremental) re-indexes, clear existing data so the bulk
+	// Appender API doesn't hit duplicate key errors and fall back to slow
+	// row-by-row inserts.
+	if !incremental {
+		if count, _ := projectDB.CountChunks(); count > 0 {
+			log.Printf("🗑️  Full re-index: clearing %d existing chunks", count)
+			if err := projectDB.ClearAllData(); err != nil {
+				return fmt.Errorf("clear existing data: %w", err)
+			}
+		}
+	}
+
 	prevEmbeddingCount, _ := projectDB.CountEmbeddings()
 
 	// Use streaming pipeline if enabled (overlaps processing, embedding, and storage)
