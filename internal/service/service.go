@@ -137,7 +137,11 @@ func (s *Service) UpdateConfig(update ConfigUpdate) ([]string, error) {
 	if fileWorkers <= 0 {
 		fileWorkers = config.DefaultWorkerCount()
 	}
-	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers)
+	maxEmbedConcurrency := cfg.MaxConcurrentEmbeddings
+	if maxEmbedConcurrency <= 0 {
+		maxEmbedConcurrency = 5
+	}
+	eng.SetParallelProcessing(cfg.EnableParallel, fileWorkers, maxEmbedConcurrency)
 	pdfWorkers := cfg.ParallelPDFWorkers
 	if pdfWorkers <= 0 {
 		pdfWorkers = config.DefaultWorkerCount()
