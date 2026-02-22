@@ -59,10 +59,10 @@ func TestChunkService_ChunkText(t *testing.T) {
 func TestChunkService_ChunkPDF(t *testing.T) {
 	service := NewChunkService(DefaultConfig)
 
-	// Create test PDF pages
+	// Create test PDF pages with enough text to pass sparse-text filter (>= 30 tokens)
 	pages := []extraction.PDFPage{
-		{PageNumber: 1, Text: "This is page one content."},
-		{PageNumber: 2, Text: "This is page two content."},
+		{PageNumber: 1, Text: "This is page one content with sufficient text for testing. We need at least thirty tokens to ensure this page is not skipped as a sparse-text page. The chunker filters out pages that appear to be mostly images."},
+		{PageNumber: 2, Text: "This is page two content with sufficient text for testing. Similarly, this page needs enough tokens to avoid being filtered. The optimization helps skip image-heavy pages with minimal text."},
 	}
 
 	metadata := &extraction.PDFMetadata{
@@ -90,9 +90,9 @@ func TestChunkService_ChunkPDF(t *testing.T) {
 func TestChunkService_ChunkMultimodal(t *testing.T) {
 	service := NewChunkService(DefaultConfig)
 
-	// Create test PDF pages
+	// Create test PDF pages with enough text to pass sparse-text filter (>= 30 tokens)
 	pages := []extraction.PDFPage{
-		{PageNumber: 1, Text: "This is page one content."},
+		{PageNumber: 1, Text: "This is page one content with sufficient text for testing. We need at least thirty tokens to ensure this page is not skipped as a sparse-text page. The chunker filters out pages that appear to be mostly images."},
 	}
 
 	// Create test images

@@ -21,7 +21,7 @@ func (p *PDFProcessor) ExtractTextFromReaderParallel(r io.ReaderAt, size int64, 
 	}
 	metadata := p.extractMetadata(reader, filePath)
 	pageCount := reader.NumPage()
-	if pageCount < 10 {
+	if pageCount < 5 {
 		return p.ExtractTextFromReader(r, size, filePath)
 	}
 	if numWorkers <= 0 {
@@ -79,8 +79,8 @@ func (p *PDFProcessor) ExtractTextParallel(filePath string, numWorkers int) ([]P
 	metadata := p.extractMetadata(reader, filePath)
 	pageCount := reader.NumPage()
 
-	// For small PDFs (< 10 pages), use sequential processing
-	if pageCount < 10 {
+	// For small PDFs (< 5 pages), use sequential processing
+	if pageCount < 5 {
 		return p.ExtractText(filePath)
 	}
 

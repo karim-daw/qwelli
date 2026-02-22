@@ -41,6 +41,7 @@ type FileProcessingService struct {
 	chunkService     *chunker.ChunkService
 	pdfProcessor     *extraction.PDFProcessor
 	imageExtractor   *extraction.ImageExtractor
+	pageRenderer     *extraction.PageRenderer
 	config           ProcessingConfig
 	parallelPDFPages bool // Enable parallel page processing for large PDFs
 	numPDFWorkers    int  // Number of workers for parallel PDF processing (0 = auto)
@@ -57,6 +58,7 @@ func NewFileProcessingService(config ProcessingConfig) *FileProcessingService {
 		chunkService:     chunker.NewChunkService(config.ChunkerConfig),
 		pdfProcessor:     extraction.NewPDFProcessor(),
 		imageExtractor:   extraction.NewImageExtractor(1024, 1024),
+		pageRenderer:     extraction.NewPageRenderer(),
 		config:           config,
 		parallelPDFPages: false, // Default to sequential for compatibility
 		numPDFWorkers:    0,     // Auto-detect
@@ -232,34 +234,62 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 	// Only extract images if we need them (not in text-only mode)
 	var images []extraction.PDFImage
 	if options.ContentTypeMode != ContentTypeText {
-		// Collect page numbers
-		pageNumbers := make([]int, len(pages))
-		for i, page := range pages {
-			pageNumbers[i] = page.PageNumber
+		// Separate pages into text-rich and sparse-text (image-heavy) pages
+		// Sparse pages get rendered as full-page images (faster than extracting individual images)
+		const minTokensForTextPage = 30
+		var textRichPages []int
+		var sparseTextPages []int
+
+		for _, page := range pages {
+			tokens := textutil.EstimateTokens(strings.TrimSpace(page.Text))
+			if tokens >= minTokensForTextPage {
+				textRichPages = append(textRichPages, page.PageNumber)
+			} else if tokens > 0 || len(pages) <= 3 {
+				// Include sparse pages only if they have some text or PDF is small
+				sparseTextPages = append(sparseTextPages, page.PageNumber)
+			}
 		}
 
-		// Extract images (use parallel extraction for many pages if enabled)
-		if s.parallelPDFPages && len(pageNumbers) > 0 {
-			images, err = s.imageExtractor.ExtractImagesByPagesParallel(file.Path, pageNumbers, s.numPDFWorkers)
+		// For sparse-text pages, try page rendering first (much faster)
+		if len(sparseTextPages) > 0 && s.pageRenderer.IsAvailable() {
+			log.Printf("  Rendering %d image-heavy pages (< %d tokens)", len(sparseTextPages), minTokensForTextPage)
+			renderedImages, err := s.pageRenderer.RenderPagesParallel(file.Path, sparseTextPages, s.numPDFWorkers)
 			if err != nil {
-				log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)",
-					filepath.Base(file.Path), err)
-				images = []extraction.PDFImage{}
+				log.Printf("⚠️  Page rendering failed, falling back to image extraction: %v", err)
+				// Fall back to image extraction for these pages
+				textRichPages = append(textRichPages, sparseTextPages...)
+				sparseTextPages = nil
+			} else {
+				images = append(images, renderedImages...)
 			}
-		} else {
-			// Sequential image extraction
-			for _, page := range pages {
-				pageImages, err := s.imageExtractor.ExtractImagesByPage(file.Path, page.PageNumber)
+		} else if len(sparseTextPages) > 0 {
+			// No page renderer available, extract images from sparse pages too
+			textRichPages = append(textRichPages, sparseTextPages...)
+		}
+
+		// For text-rich pages, extract embedded images (if any)
+		if len(textRichPages) > 0 {
+			if s.parallelPDFPages {
+				pageImages, err := s.imageExtractor.ExtractImagesByPagesParallel(file.Path, textRichPages, s.numPDFWorkers)
 				if err != nil {
-					log.Printf("⚠️  Failed to extract images from page %d of %s: %v (continuing)",
-						page.PageNumber, filepath.Base(file.Path), err)
-					continue
+					log.Printf("⚠️  Failed to extract images from %s: %v (continuing with text only)",
+						filepath.Base(file.Path), err)
+				} else {
+					images = append(images, pageImages...)
 				}
-				images = append(images, pageImages...)
+			} else {
+				// Sequential image extraction
+				for _, pageNum := range textRichPages {
+					pageImages, err := s.imageExtractor.ExtractImagesByPage(file.Path, pageNum)
+					if err != nil {
+						log.Printf("⚠️  Failed to extract images from page %d of %s: %v (continuing)",
+							pageNum, filepath.Base(file.Path), err)
+						continue
+					}
+					images = append(images, pageImages...)
+				}
 			}
 		}
-	} else {
-		images = []extraction.PDFImage{}
 	}
 
 	// Chunk PDF with multimodal support
