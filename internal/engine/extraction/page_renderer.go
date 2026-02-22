@@ -194,9 +194,12 @@ func (r *PageRenderer) RenderPagesParallel(pdfPath string, pageNumbers []int, nu
 	}
 
 	if numWorkers <= 0 {
-		numWorkers = int(float64(runtime.NumCPU()) * 0.9)
+		numWorkers = int(float64(runtime.NumCPU()) * 0.5)
 		if numWorkers < 1 {
 			numWorkers = 1
+		}
+		if numWorkers > 8 {
+			numWorkers = 8
 		}
 	}
 
@@ -214,11 +217,17 @@ func (r *PageRenderer) RenderPagesParallel(pdfPath string, pageNumbers []int, nu
 		return images, nil
 	}
 
-	// Parallel rendering
-	var (
-		images []PDFImage
-		mu     sync.Mutex
-	)
+	// Parallel rendering with index-based results for deterministic order
+	type indexedResult struct {
+		image *PDFImage
+	}
+	results := make([]indexedResult, len(pageNumbers))
+
+	// Build page number to index mapping
+	pageToIndex := make(map[int]int, len(pageNumbers))
+	for i, pn := range pageNumbers {
+		pageToIndex[pn] = i
+	}
 
 	jobs := make(chan int, numWorkers*2)
 	var wg sync.WaitGroup
@@ -233,9 +242,7 @@ func (r *PageRenderer) RenderPagesParallel(pdfPath string, pageNumbers []int, nu
 					log.Printf("  Failed to render page %d: %v", pageNum, err)
 					continue
 				}
-				mu.Lock()
-				images = append(images, *img)
-				mu.Unlock()
+				results[pageToIndex[pageNum]] = indexedResult{image: img}
 			}
 		}()
 	}
@@ -246,6 +253,14 @@ func (r *PageRenderer) RenderPagesParallel(pdfPath string, pageNumbers []int, nu
 	close(jobs)
 
 	wg.Wait()
+
+	// Collect non-nil results in order
+	var images []PDFImage
+	for _, r := range results {
+		if r.image != nil {
+			images = append(images, *r.image)
+		}
+	}
 
 	return images, nil
 }
