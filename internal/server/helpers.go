@@ -127,7 +127,13 @@ func parseContentTypeMode(s string) fileprocessor.ContentTypeMode {
 		return fileprocessor.ContentTypeText
 	case "images":
 		return fileprocessor.ContentTypeImages
+	case "text_images":
+		return fileprocessor.ContentTypeTextImages
+	case "text_pdfimages":
+		return fileprocessor.ContentTypeTextPDFImages
+	case "all", "both":
+		return fileprocessor.ContentTypeAll
 	default:
-		return fileprocessor.ContentTypeBoth
+		return fileprocessor.ContentTypeAll
 	}
 }

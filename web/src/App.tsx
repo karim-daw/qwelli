@@ -106,7 +106,7 @@ function App() {
     const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
     const [loadingStatus, setLoadingStatus] = useState(false);
     const [newIndexPath, setNewIndexPath] = useState("");
-    const [indexContentType, setIndexContentType] = useState<"both" | "text" | "images">("both");
+    const [indexContentType, setIndexContentType] = useState<"text" | "images" | "text_images" | "text_pdfimages" | "all">("all");
     const [indexing, setIndexing] = useState(false);
     const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(
         null,
@@ -1845,45 +1845,24 @@ function App() {
                                 <label className="block text-sm font-medium mb-2">
                                     Index Content Type
                                 </label>
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIndexContentType("both")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "both"
-                                            ? `${accentBtnBg} ${accentBtnText} ${isDark ? "border-white" : "border-gray-900"}`
-                                            : `${secondaryBtnBorder} ${secondaryBtnHover}`
-                                            }`}
-                                        disabled={indexing}
-                                    >
-                                        Both
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIndexContentType("text")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "text"
-                                            ? `${accentBtnBg} ${accentBtnText} ${isDark ? "border-white" : "border-gray-900"}`
-                                            : `${secondaryBtnBorder} ${secondaryBtnHover}`
-                                            }`}
-                                        disabled={indexing}
-                                    >
-                                        Text Only
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIndexContentType("images")}
-                                        className={`flex-1 px-3 py-2 text-sm rounded-md border transition-colors ${indexContentType === "images"
-                                            ? `${accentBtnBg} ${accentBtnText} ${isDark ? "border-white" : "border-gray-900"}`
-                                            : `${secondaryBtnBorder} ${secondaryBtnHover}`
-                                            }`}
-                                        disabled={indexing}
-                                    >
-                                        Images Only
-                                    </button>
-                                </div>
+                                <select
+                                    value={indexContentType}
+                                    onChange={(e) => setIndexContentType(e.target.value as typeof indexContentType)}
+                                    disabled={indexing}
+                                    className={`w-full px-3 py-2 text-sm rounded-md border transition-colors ${isDark ? "bg-gray-800 border-gray-600 text-gray-200" : "bg-white border-gray-300 text-gray-800"}`}
+                                >
+                                    <option value="all">Full Multimodal</option>
+                                    <option value="text">Text Only</option>
+                                    <option value="images">Images Only</option>
+                                    <option value="text_images">Text + Images</option>
+                                    <option value="text_pdfimages">Text + PDF Images</option>
+                                </select>
                                 <p className={`text-xs ${subtleText} mt-2`}>
-                                    {indexContentType === "both" && "Index both text and images from PDFs"}
-                                    {indexContentType === "text" && "Index only text content (faster, smaller index)"}
-                                    {indexContentType === "images" && "Index only images from PDFs"}
+                                    {indexContentType === "all" && "Text, standalone images, and PDF image extraction"}
+                                    {indexContentType === "text" && "Text files and PDF text only (fastest)"}
+                                    {indexContentType === "images" && "Standalone image files only"}
+                                    {indexContentType === "text_images" && "Text files, PDF text, and standalone images (no PDF image extraction)"}
+                                    {indexContentType === "text_pdfimages" && "Text files, PDF text, and PDF image extraction (no standalone images)"}
                                 </p>
                             </div>
 

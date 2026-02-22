@@ -163,6 +163,18 @@ func (e *Engine) processOneFile(f string) fileProcessResult {
 		return fileProcessResult{file: file, skipped: false}
 	}
 
+	// Early skip based on content type mode — avoids noisy warnings downstream
+	mode := e.contentTypeMode
+	if fileprocessor.IsImageFile(file.FileType) && !mode.IncludesStandaloneImages() {
+		return fileProcessResult{skipped: true}
+	}
+	if fileprocessor.IsTextFile(file.FileType) && !mode.IncludesText() {
+		return fileProcessResult{skipped: true}
+	}
+	if fileprocessor.IsPDFFile(file.FileType) && !mode.IncludesText() && !mode.IncludesPDFImages() {
+		return fileProcessResult{skipped: true}
+	}
+
 	// Single read path for files under 50MB: read once, hash from bytes, process from bytes
 	if info.Size() <= maxSingleReadSize && info.Size() >= 0 {
 		data, readErr := os.ReadFile(absPath)

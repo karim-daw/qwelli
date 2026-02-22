@@ -31,7 +31,7 @@ func DefaultProcessingConfig() ProcessingConfig {
 	return ProcessingConfig{
 		ChunkerConfig:    chunker.DefaultConfig,
 		EnableMultimodal: true,
-		ContentTypeMode:  ContentTypeBoth,
+		ContentTypeMode:  ContentTypeAll,
 	}
 }
 
@@ -192,17 +192,12 @@ func (s *FileProcessingService) processText(file db.File, options ProcessOptions
 
 // processPDF handles PDF file processing
 func (s *FileProcessingService) processPDF(file db.File, options ProcessOptions) ([]db.Chunk, []string, error) {
-	// If text-only mode is selected, use text-only processing
-	if options.ContentTypeMode == ContentTypeText {
-		return s.processPDFTextOnly(file, options)
-	}
-
-	// If multimodal is enabled and we want images or both, use multimodal processing
-	if options.EnableMultimodal {
+	// Use multimodal processing only when PDF image extraction is requested and multimodal is enabled
+	if options.ContentTypeMode.IncludesPDFImages() && options.EnableMultimodal {
 		return s.processPDFMultimodal(file, options)
 	}
 
-	// Default to text-only if multimodal is disabled
+	// All other modes: text-only PDF processing
 	return s.processPDFTextOnly(file, options)
 }
 
@@ -231,9 +226,9 @@ func (s *FileProcessingService) processPDFMultimodal(file db.File, options Proce
 		return nil, nil, fmt.Errorf("failed to extract PDF text: %w", err)
 	}
 
-	// Only extract images if we need them (not in text-only mode)
+	// Only extract images if PDF image extraction is requested
 	var images []extraction.PDFImage
-	if options.ContentTypeMode != ContentTypeText {
+	if options.ContentTypeMode.IncludesPDFImages() {
 		// Separate pages into text-rich and sparse-text (image-heavy) pages
 		// Sparse pages get rendered as full-page images (faster than extracting individual images)
 		var textRichPages []int
@@ -378,11 +373,6 @@ func (s *FileProcessingService) processImage(file db.File, options ProcessOption
 
 // processImageFromBytes handles image processing from pre-read bytes
 func (s *FileProcessingService) processImageFromBytes(file db.File, imageData []byte, options ProcessOptions) ([]db.Chunk, []string, error) {
-	// Skip image files in text-only mode
-	if options.ContentTypeMode == ContentTypeText {
-		return nil, nil, fmt.Errorf("skipping image file in text-only mode: %s", filepath.Base(file.Path))
-	}
-
 	// Decode image to get format and dimensions
 	img, format, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {
@@ -423,18 +413,21 @@ func (s *FileProcessingService) processImageFromBytes(file db.File, imageData []
 
 // filterChunksByContentType filters chunks based on content type mode
 func (s *FileProcessingService) filterChunksByContentType(chunks []chunker.Chunk, mode ContentTypeMode) []chunker.Chunk {
-	if mode == ContentTypeBoth {
-		return chunks // No filtering
+	// Modes that include both text and PDF images need no filtering
+	if mode == ContentTypeAll || mode == ContentTypeTextPDFImages {
+		return chunks
 	}
 
 	var filtered []chunker.Chunk
 	for _, chunk := range chunks {
 		switch mode {
-		case ContentTypeText:
+		case ContentTypeText, ContentTypeTextImages:
+			// Text modes: keep only text chunks from PDFs
 			if chunk.ContentType == "text" {
 				filtered = append(filtered, chunk)
 			}
 		case ContentTypeImages:
+			// Images-only: keep only image chunks
 			if chunk.ContentType == "image" {
 				filtered = append(filtered, chunk)
 			}
