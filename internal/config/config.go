@@ -34,6 +34,11 @@ type Config struct {
 	ParallelPDFWorkers      int  `yaml:"parallel_pdf_workers"`      // Number of PDF page workers (0 = auto: ~90% of CPU cores)
 	MaxConcurrentEmbeddings int  `yaml:"max_concurrent_embeddings"` // Max parallel embedding API calls (default: 5)
 
+	// Agent / Azure AI Foundry settings (Claude via Foundry)
+	FoundryEndpoint string `yaml:"foundry_endpoint"` // e.g. https://resource.services.ai.azure.com/anthropic
+	FoundryAPIKey   string `yaml:"foundry_api_key"`
+	FoundryModel    string `yaml:"foundry_model"` // default: claude-sonnet-4-6
+
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
 }
@@ -58,7 +63,8 @@ func DefaultConfig() *Config {
 		EnableParallelPDF:       true, // Parallel PDF page processing enabled by default
 		ParallelPDFWorkers:      0,    // 0 = auto-detect (~90% of CPU cores)
 		MaxConcurrentEmbeddings: 5,    // Max parallel embedding API calls
-		IndexDir:           filepath.Join(homeDir, ".qwelli", "indexes"),
+		FoundryModel:           "claude-sonnet-4-6",
+		IndexDir:               filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
 
@@ -123,6 +129,17 @@ func Load(path ...string) (*Config, error) {
 		if _, err := fmt.Sscanf(val, "%d", &n); err == nil && n > 0 {
 			cfg.MaxConcurrentEmbeddings = n
 		}
+	}
+
+	// Agent / Azure AI Foundry overrides
+	if v := os.Getenv("FOUNDRY_ENDPOINT"); v != "" {
+		cfg.FoundryEndpoint = v
+	}
+	if v := os.Getenv("FOUNDRY_API_KEY"); v != "" {
+		cfg.FoundryAPIKey = v
+	}
+	if v := os.Getenv("FOUNDRY_MODEL"); v != "" {
+		cfg.FoundryModel = v
 	}
 
 	return &cfg, nil
