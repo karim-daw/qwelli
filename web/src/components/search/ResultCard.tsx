@@ -48,7 +48,7 @@ export function ResultCard({
     return (
         <div
             key={result.chunkId + index}
-            className="border rounded-lg p-5 hover:border-border/80 transition-colors bg-card/50"
+            className="border rounded-lg p-5 bg-card/50 transition-all duration-150 ease-in-out hover:bg-muted hover:border-border"
         >
             {/* Header */}
             <div className="flex items-start justify-between gap-4 mb-3">
