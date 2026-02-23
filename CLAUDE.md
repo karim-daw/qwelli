@@ -50,7 +50,7 @@ CLI/Server → Service → Engine → DB
 
 - **Service layer** (`internal/service/`) owns DB lifecycle. CLI and server code never open databases directly — they call `service.Load()` or `service.New()`.
 - **Engine** (`internal/engine/engine.go`) receives `*db.ProjectDB` from callers. It coordinates file processing, embedding, and search but doesn't manage connections.
-- **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries. `ReadIndexMeta()` is a lightweight read-only path (no VSS, no schema DDL) used by `ListIndexes()` to read only `folder_path` and chunk count — do not replace it with `OpenProjectDB()` calls in listing code.
+- **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries. `ReadIndexMeta()` is a lightweight read-only path (no VSS, no schema DDL) used by `ListIndexes()` to read only `folder_path` and chunk count — do not replace it with `OpenProjectDB()` calls in listing code. `FindFiles(FindFilesFilter)` pushes type/name/date/subfolder predicates into SQL — use it instead of `GetAllFiles()` + Go-side filtering. `AnalyzeStats()` runs `ANALYZE` after bulk inserts to refresh query-planner statistics. HNSW indexes are built with M=12, ef_construction=64 for better recall than DuckDB defaults.
 
 ### Key Interfaces
 
@@ -68,7 +68,7 @@ Uses **shadcn/ui** (Radix primitives + Tailwind CSS), **sonner** for toasts, and
 web/src/
   api/          # Typed fetch wrapper (client.ts) + per-feature modules (search, indexes, chat)
   types/        # TypeScript interfaces mirroring server/types.go + chat event/message types
-  contexts/     # AppContext (indexes, viewMode) + SearchContext (query, results, recent searches)
+  contexts/     # AppContext (indexes, viewMode) + AppMetaContext (needsSetup, quitConfirmed) + SearchContext (query, results, recent searches)
   hooks/        # useTheme, useSSE, useResizable, useSearch, useIndexProgress, useChat, etc.
   components/
     ui/         # shadcn/ui generated components (Button, Dialog, Card, etc.)
@@ -84,19 +84,20 @@ web/src/
 ```
 
 **Key patterns:**
-- **Contexts** use plain `useState` with setter functions exposed via context — no `useReducer`. Context values are wrapped in `useMemo` to prevent unnecessary re-renders.
+- **Contexts** use plain `useState` with setter functions exposed via context — no `useReducer`. Context values are wrapped in `useMemo` to prevent unnecessary re-renders. `AppContext` holds index/selection/viewMode state. `AppMetaContext` holds `needsSetup`/`quitConfirmed` — kept separate so index-driven re-renders don't cascade into setup/quit components.
 - **Theme** uses Tailwind `dark:` variants and CSS variable classes (`bg-background`, `text-foreground`, `bg-muted`, etc.) instead of runtime `isDark` conditionals. The `.dark` class is toggled on `<html>` by `useTheme`.
 - **API client** (`client.ts`) — typed `get`/`post`/`rawPost` wrappers accept an optional `AbortSignal` for request cancellation.
 - **Search** — in-flight requests are cancelled via `AbortController` when a new search starts or the component unmounts. Recent searches strip large fields (`imageData`, `content`) to keep localStorage lightweight. Recent searches are stored in `SearchContext` (backed by localStorage, keyed by index path).
 - **Chat** — `ChatView` pins the input at the bottom with a gradient fade. Auto-scroll only triggers when the user is near the bottom; a floating scroll-to-bottom button appears when scrolled up. `ToolCallBlock` uses Lucide icons with colored icon pills and CSS grid animated expand/collapse. SSE stream readers use `try/finally` to release locks.
-- **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support. EventSources are closed on unmount.
-- **Terminal** — logs are capped at 500 entries to prevent memory growth.
+- **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support. EventSources are closed before re-creating and on unmount.
+- **Terminal** — all backend `log.Printf` calls flow to the terminal automatically via `BroadcastWriter` (set as `log.SetOutput` in `Start()`). `useTerminal` batches SSE messages into state every 100ms to cap React re-renders at ~10/s during heavy indexing. Logs are capped at 500 entries server-side and client-side.
 - **Modals** — `FullTextModal` and `NewIndexDialog` use shadcn `Dialog`. `PDFPreviewModal` uses a plain overlay (shadcn Dialog's base classes conflict with the full-height flex layout needed for the PDF viewer).
 
 ### Server Patterns
 
 - **Port resolution** (`listener.go`): `ResolveListener(port, portExplicit)` binds the socket before the server starts. Default port (8080) auto-falls back to an OS-assigned port if busy; explicit `--port` fails with a clear error. Both `Server` and `SetupServer` expose a `Listen(portExplicit)` method — call it before `Start()`. The listener-first approach also eliminates the need for `time.Sleep` before opening the browser.
 - **`GET /api/indexes`** (`ListIndexes`) opens all `.db` files in parallel via `db.ReadIndexMeta()` (read-only, no VSS load). Do not revert to serial `OpenProjectDB()` calls — that path takes ~140ms per file.
+- **Log broadcasting** (`log_broadcast.go`): `BroadcastWriter` is set as `log.SetOutput` in `Server.Start()`. Every `log.Printf` anywhere in the codebase — engine, pipeline, voyage, differ, etc. — automatically appears in the terminal panel. Do not call `BroadcastTerminalOutput` directly for regular log messages; use `log.Printf` instead. `BroadcastTerminalOutput` is reserved for structured progress/phase events from `progressCb`/`phaseCb`.
 - SSE (Server-Sent Events) for real-time indexing progress (`/api/index/progress`) and terminal output (`/api/terminal/stream`).
 - Search results cached in-memory with 5-minute TTL.
 - Background indexing with cancellation support via context.
@@ -164,7 +165,7 @@ Environment variables override `~/.qwelli/config.yaml` values.
 2. Use shadcn/ui primitives (`Button`, `Card`, `Dialog`, etc.) — don't hand-roll HTML equivalents
 3. Use CSS variable classes for theming (`bg-background`, `text-muted-foreground`, `dark:text-red-400`) — never `isDark` ternaries
 4. For API calls, add a function in the relevant `web/src/api/` module, not inline `fetch()`
-5. For shared state, use `useAppContext()` or `useSearchContext()` — not prop drilling
+5. For shared state, use `useAppContext()` (indexes/selection/viewMode), `useAppMetaContext()` (needsSetup/quitConfirmed), or `useSearchContext()` — not prop drilling
 6. Run `cd web && npx tsc --noEmit && npm run build` to verify
 
 ## Adding a New API Endpoint
@@ -202,3 +203,5 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Agent tool results are strings — use JSON for structured data, plain text for file contents.
 - The Anthropic SDK `NewClient()` returns by value (not pointer) — `anthropic.Client`, not `*anthropic.Client`.
 - Always use `--admin` flag when merging PRs with `gh pr merge`.
+- Use `log.Printf` for all backend diagnostic output — never `fmt.Printf` and never direct `BroadcastTerminalOutput` calls for plain log messages. `BroadcastWriter` ensures every `log.Printf` reaches both stderr and the in-app terminal automatically.
+- Agent `find_files` tool must delegate to `projectDB.FindFiles(db.FindFilesFilter{...})` — do not call `GetAllFiles()` and filter in Go.
