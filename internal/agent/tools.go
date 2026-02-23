@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine"
 	"github.com/karim-daw/qwelli/internal/service"
 )
@@ -549,42 +550,51 @@ func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMess
 		in.Limit = 200
 	}
 
+	// Parse date filters
+	var afterTime, beforeTime time.Time
+	if in.ModifiedAfter != "" {
+		t, err := time.Parse("2006-01-02", in.ModifiedAfter)
+		if err != nil {
+			return fmt.Sprintf("invalid modified_after date format (use YYYY-MM-DD): %v", err), true
+		}
+		afterTime = t
+	}
+	if in.ModifiedBefore != "" {
+		t, err := time.Parse("2006-01-02", in.ModifiedBefore)
+		if err != nil {
+			return fmt.Sprintf("invalid modified_before date format (use YYYY-MM-DD): %v", err), true
+		}
+		beforeTime = t.Add(24 * time.Hour) // include the full day
+	}
+
+	// Resolve subfolder to an absolute prefix including trailing separator
+	var subfolderPrefix string
+	if in.Subfolder != "" {
+		abs := in.Subfolder
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(indexPath, abs)
+		}
+		subfolderPrefix = strings.ToLower(abs) + string(filepath.Separator)
+	}
+
+	filter := db.FindFilesFilter{
+		FileType:       strings.TrimPrefix(in.FileType, "."),
+		NameContains:   in.NameContains,
+		ModifiedAfter:  afterTime,
+		ModifiedBefore: beforeTime,
+		SubfolderAbs:   subfolderPrefix,
+		Limit:          in.Limit,
+	}
+
 	projectDB, err := svc.OpenDB(indexPath)
 	if err != nil {
 		return fmt.Sprintf("failed to open index: %v", err), true
 	}
 	defer projectDB.Close()
 
-	allFiles, err := projectDB.GetAllFiles()
+	files, err := projectDB.FindFiles(filter)
 	if err != nil {
 		return fmt.Sprintf("failed to query files: %v", err), true
-	}
-
-	// Parse date filters
-	var afterTime, beforeTime time.Time
-	if in.ModifiedAfter != "" {
-		if t, err := time.Parse("2006-01-02", in.ModifiedAfter); err == nil {
-			afterTime = t
-		} else {
-			return fmt.Sprintf("invalid modified_after date format (use YYYY-MM-DD): %v", err), true
-		}
-	}
-	if in.ModifiedBefore != "" {
-		if t, err := time.Parse("2006-01-02", in.ModifiedBefore); err == nil {
-			beforeTime = t.Add(24 * time.Hour) // include the full day
-		} else {
-			return fmt.Sprintf("invalid modified_before date format (use YYYY-MM-DD): %v", err), true
-		}
-	}
-
-	// Resolve subfolder filter
-	var subfolderAbs string
-	if in.Subfolder != "" {
-		if filepath.IsAbs(in.Subfolder) {
-			subfolderAbs = strings.ToLower(in.Subfolder)
-		} else {
-			subfolderAbs = strings.ToLower(filepath.Join(indexPath, in.Subfolder))
-		}
 	}
 
 	type fileResult struct {
@@ -595,39 +605,8 @@ func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMess
 		ModifiedAt string `json:"modified_at"`
 	}
 
-	var results []fileResult
-	for _, f := range allFiles {
-		// Filter by file type
-		if in.FileType != "" {
-			ft := strings.TrimPrefix(in.FileType, ".")
-			if !strings.EqualFold(f.FileType, ft) {
-				continue
-			}
-		}
-
-		// Filter by name
-		if in.NameContains != "" {
-			if !strings.Contains(strings.ToLower(filepath.Base(f.Path)), strings.ToLower(in.NameContains)) {
-				continue
-			}
-		}
-
-		// Filter by date
-		if !afterTime.IsZero() && f.ModifiedAt.Before(afterTime) {
-			continue
-		}
-		if !beforeTime.IsZero() && f.ModifiedAt.After(beforeTime) {
-			continue
-		}
-
-		// Filter by subfolder
-		if subfolderAbs != "" {
-			if !strings.HasPrefix(strings.ToLower(f.Path), subfolderAbs+string(filepath.Separator)) &&
-				!strings.EqualFold(filepath.Dir(f.Path), subfolderAbs) {
-				continue
-			}
-		}
-
+	results := make([]fileResult, 0, len(files))
+	for _, f := range files {
 		results = append(results, fileResult{
 			Path:       f.Path,
 			FileName:   filepath.Base(f.Path),
@@ -635,10 +614,6 @@ func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMess
 			SizeBytes:  f.Size,
 			ModifiedAt: f.ModifiedAt.Format("2006-01-02"),
 		})
-
-		if len(results) >= in.Limit {
-			break
-		}
 	}
 
 	wrapper := map[string]any{
