@@ -11,6 +11,16 @@ import (
 	"github.com/karim-daw/qwelli/internal/service"
 )
 
+// ChatEvent represents a streaming event from the agent loop.
+type ChatEvent struct {
+	Type       string          `json:"type"`                  // "thinking", "tool_call", "tool_result", "text_delta", "done", "error"
+	Text       string          `json:"text,omitempty"`        // for text_delta, thinking, error
+	ToolName   string          `json:"tool_name,omitempty"`   // for tool_call, tool_result
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`  // for tool_call
+	ToolResult string          `json:"tool_result,omitempty"` // for tool_result
+	IsError    bool            `json:"is_error,omitempty"`    // for tool_result
+}
+
 // Agent orchestrates a conversational tool-use loop with Claude via Azure AI Foundry.
 type Agent struct {
 	client   anthropic.Client
@@ -75,12 +85,14 @@ Available index: %s (%d files, %d chunks)`, indexPath, fileCount, chunkCount)
 	}, nil
 }
 
-// Chat sends a user message and streams the agent's response to stdout.
-// It runs the tool-use loop until the agent produces a text-only response.
-func (a *Agent) Chat(ctx context.Context, userMessage string) error {
+// ChatStream runs the tool-use loop, emitting structured events via the callback.
+// It processes the user message and loops until the agent produces a text-only response.
+func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(ChatEvent)) error {
 	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage)))
 
 	for {
+		emit(ChatEvent{Type: "thinking"})
+
 		stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 			Model:     a.model,
 			MaxTokens: 8192,
@@ -93,18 +105,19 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) error {
 		for stream.Next() {
 			event := stream.Current()
 			if err := message.Accumulate(event); err != nil {
+				emit(ChatEvent{Type: "error", Text: fmt.Sprintf("accumulate stream event: %v", err)})
 				return fmt.Errorf("accumulate stream event: %w", err)
 			}
 
-			// Stream text deltas to stdout in real-time
 			switch ev := event.AsAny().(type) {
 			case anthropic.ContentBlockDeltaEvent:
 				if ev.Delta.Text != "" {
-					fmt.Print(ev.Delta.Text)
+					emit(ChatEvent{Type: "text_delta", Text: ev.Delta.Text})
 				}
 			}
 		}
 		if err := stream.Err(); err != nil {
+			emit(ChatEvent{Type: "error", Text: fmt.Sprintf("stream error: %v", err)})
 			return fmt.Errorf("stream error: %w", err)
 		}
 
@@ -115,22 +128,39 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) error {
 		var toolResults []anthropic.ContentBlockParamUnion
 		for _, block := range message.Content {
 			if variant, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
-				fmt.Fprintf(os.Stderr, "\n  [tool: %s]\n", variant.Name)
+				rawInput := json.RawMessage(variant.JSON.Input.Raw())
+				emit(ChatEvent{Type: "tool_call", ToolName: variant.Name, ToolInput: rawInput})
 
-				result, isErr := executeTool(ctx, a.svc, a.index, a.dbPath, variant.Name, json.RawMessage(variant.JSON.Input.Raw()))
+				result, isErr := executeTool(ctx, a.svc, a.index, a.dbPath, variant.Name, rawInput)
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(variant.ID, result, isErr))
+				emit(ChatEvent{Type: "tool_result", ToolName: variant.Name, ToolResult: result, IsError: isErr})
 			}
 		}
 
 		// No tool calls — agent is done
 		if len(toolResults) == 0 {
-			fmt.Println() // final newline
+			emit(ChatEvent{Type: "done"})
 			return nil
 		}
 
 		// Send tool results back
 		a.messages = append(a.messages, anthropic.NewUserMessage(toolResults...))
 	}
+}
+
+// Chat sends a user message and streams the agent's response to stdout.
+// It runs the tool-use loop until the agent produces a text-only response.
+func (a *Agent) Chat(ctx context.Context, userMessage string) error {
+	return a.ChatStream(ctx, userMessage, func(ev ChatEvent) {
+		switch ev.Type {
+		case "text_delta":
+			fmt.Print(ev.Text)
+		case "tool_call":
+			fmt.Fprintf(os.Stderr, "\n  [tool: %s]\n", ev.ToolName)
+		case "done":
+			fmt.Println()
+		}
+	})
 }
 
 // ClearHistory resets the conversation history.
