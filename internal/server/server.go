@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -73,6 +74,9 @@ func (s *Server) Listen(portExplicit bool) (int, error) {
 }
 
 func (s *Server) Start() error {
+	log.SetFlags(0)
+	log.SetOutput(NewBroadcastWriter(os.Stderr))
+
 	mux := http.NewServeMux()
 
 	// API routes
@@ -104,15 +108,7 @@ func (s *Server) Start() error {
 
 	cfg := s.service.Config()
 	addr := fmt.Sprintf(":%d", s.port)
-	
-	// Broadcast server startup messages to terminal
-	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🚀 Server starting on http://localhost%s"}`, addr))
-	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"📂 Index directory: %s"}`, cfg.IndexDir))
-	BroadcastTerminalOutput(fmt.Sprintf(`{"type":"log","level":"info","message":"🤖 Model: %s"}`, cfg.Model))
-	if cfg.EnableReranker {
-		BroadcastTerminalOutput(`{"type":"log","level":"info","message":"🔄 Reranker: enabled"}`)
-	}
-	
+
 	log.Printf("🚀 Server starting on http://localhost%s", addr)
 	log.Printf("📂 Index directory: %s", cfg.IndexDir)
 	log.Printf("🤖 Model: %s", cfg.Model)

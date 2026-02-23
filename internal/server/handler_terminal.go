@@ -11,7 +11,7 @@ var (
 	terminalClientsMutex sync.RWMutex
 	terminalHistory      []string
 	terminalHistoryMutex sync.RWMutex
-	maxTerminalHistory   = 100
+	maxTerminalHistory   = 500
 )
 
 // BroadcastTerminalOutput sends a log message to all connected terminal clients
@@ -49,7 +49,7 @@ func (s *Server) handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	ch := make(chan string, 50)
+	ch := make(chan string, 200)
 	terminalClientsMutex.Lock()
 	terminalClients = append(terminalClients, ch)
 	terminalClientsMutex.Unlock()
