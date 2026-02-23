@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
 import type { SearchResult, RecentSearch } from "@/types/search";
 
 const STORAGE_KEY = "qwelli_recent_searches";
@@ -96,30 +96,46 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         setRecentSearches([]);
     }, []);
 
+    const value = useMemo(
+        () => ({
+            query,
+            strategy,
+            topK,
+            contentFilter,
+            results,
+            loading,
+            cacheStatus,
+            recentSearches,
+            setQuery,
+            setStrategy,
+            setTopK,
+            setContentFilter,
+            setResults,
+            setLoading,
+            setCacheStatus,
+            reset,
+            loadRecentSearches,
+            saveRecentSearch,
+            clearRecentSearches,
+        }),
+        [
+            query,
+            strategy,
+            topK,
+            contentFilter,
+            results,
+            loading,
+            cacheStatus,
+            recentSearches,
+            reset,
+            loadRecentSearches,
+            saveRecentSearch,
+            clearRecentSearches,
+        ],
+    );
+
     return (
-        <SearchContext.Provider
-            value={{
-                query,
-                strategy,
-                topK,
-                contentFilter,
-                results,
-                loading,
-                cacheStatus,
-                recentSearches,
-                setQuery,
-                setStrategy,
-                setTopK,
-                setContentFilter,
-                setResults,
-                setLoading,
-                setCacheStatus,
-                reset,
-                loadRecentSearches,
-                saveRecentSearch,
-                clearRecentSearches,
-            }}
-        >
+        <SearchContext.Provider value={value}>
             {children}
         </SearchContext.Provider>
     );

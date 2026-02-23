@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useMemo, type ReactNode } from "react";
 import type { Index } from "@/types/index";
 
 type ViewMode = "search" | "status" | "chat";
@@ -25,21 +25,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
     const [quitConfirmed, setQuitConfirmed] = useState(false);
 
+    const value = useMemo(
+        () => ({
+            indexes,
+            selectedIndex,
+            viewMode,
+            needsSetup,
+            quitConfirmed,
+            setIndexes,
+            setSelectedIndex,
+            setViewMode,
+            setNeedsSetup,
+            setQuitConfirmed,
+        }),
+        [indexes, selectedIndex, viewMode, needsSetup, quitConfirmed],
+    );
+
     return (
-        <AppContext.Provider
-            value={{
-                indexes,
-                selectedIndex,
-                viewMode,
-                needsSetup,
-                quitConfirmed,
-                setIndexes,
-                setSelectedIndex,
-                setViewMode,
-                setNeedsSetup,
-                setQuitConfirmed,
-            }}
-        >
+        <AppContext.Provider value={value}>
             {children}
         </AppContext.Provider>
     );

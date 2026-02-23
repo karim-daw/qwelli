@@ -38,17 +38,19 @@ export function useChat(indexPath: string) {
 
             const handleEvent = (event: ChatEvent) => {
                 setMessages((prev) => {
-                    const updated = [...prev];
-                    const idx = updated.findIndex(
-                        (m) => m.id === assistantId,
-                    );
-                    if (idx === -1) return prev;
-                    const msg = { ...updated[idx] };
+                    // Find the assistant message by scanning from the end (it's always last)
+                    const idx = prev.length - 1;
+                    if (idx < 0 || prev[idx].id !== assistantId) return prev;
+
+                    const msg = { ...prev[idx] };
                     const toolCalls = [...(msg.toolCalls || [])];
 
                     switch (event.type) {
                         case "thinking":
                             msg.isStreaming = true;
+                            if (msg.content.length > 0) {
+                                msg.content += "\n\n";
+                            }
                             break;
                         case "text_delta":
                             msg.content += event.text || "";
@@ -86,6 +88,8 @@ export function useChat(indexPath: string) {
                             break;
                     }
 
+                    // Replace only the last element instead of spreading the entire array
+                    const updated = prev.slice();
                     updated[idx] = msg;
                     return updated;
                 });
