@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/engine"
@@ -38,6 +39,18 @@ func (s *Server) getCached(key string) ([]SearchResultItem, bool) {
 func (s *Server) setCache(key string, results []SearchResultItem) {
 	s.cacheMutex.Lock()
 	s.searchCache[key] = &searchCacheEntry{Results: results, Timestamp: time.Now()}
+	s.cacheMutex.Unlock()
+}
+
+// clearSearchCache deletes all cached results whose key contains indexPath.
+// Called after indexing completes to prevent stale results from being served.
+func (s *Server) clearSearchCache(indexPath string) {
+	s.cacheMutex.Lock()
+	for k := range s.searchCache {
+		if strings.Contains(k, indexPath) {
+			delete(s.searchCache, k)
+		}
+	}
 	s.cacheMutex.Unlock()
 }
 
