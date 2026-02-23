@@ -9,14 +9,18 @@ Qwelli is a local semantic file search engine. It indexes folders using Voyage A
 ## Build & Test Commands
 
 ```bash
+# Full build: frontend + Go binary (Windows)
+scripts\build.bat
+
+# Full build: frontend + Go binary (Linux/Mac)
+./scripts/build.sh
+
+# Release build (stripped binary, no console window on Windows)
+scripts\build.bat --release
+./scripts/build.sh --release
+
 # Build Go binary only (requires web/dist to exist for embedded UI)
 go build -o qwelli ./cmd/qwelli
-
-# Build with embedded web UI (Windows native)
-scripts\build-with-ui.bat
-
-# Build with embedded web UI (Linux/Mac)
-./scripts/build-with-ui.sh
 
 # Build web frontend separately
 cd web && npm install && npm run build
@@ -33,7 +37,7 @@ go test -v ./internal/engine/chunker/...
 go test -v -run TestFunctionName ./internal/engine/...
 ```
 
-**Build requirements:** Go 1.25+, CGO enabled (DuckDB requires it). On Windows, needs MSYS2 with `mingw-w64-ucrt-x86_64-gcc` and `C:\msys64\ucrt64\bin` in PATH.
+**Build requirements:** Go 1.25+, CGO enabled (DuckDB requires it). On Windows, needs MSYS2 with `mingw-w64-ucrt-x86_64-gcc` and `C:\msys64\ucrt64\bin` in PATH. DuckDB is statically linked via platform-specific Go bindings (`duckdb-go-bindings/windows-amd64`, etc.) — no separate DLL or library download needed.
 
 ## Architecture
 

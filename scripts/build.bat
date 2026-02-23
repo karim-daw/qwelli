@@ -2,9 +2,15 @@
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   Qwelli Windows Release Build
+echo   Qwelli Build
 echo ============================================
 echo.
+
+REM Parse arguments
+set "RELEASE=0"
+for %%a in (%*) do (
+    if "%%a"=="--release" set "RELEASE=1"
+)
 
 REM Get script directory and project root
 set "SCRIPT_DIR=%~dp0"
@@ -14,7 +20,7 @@ cd /d "%ROOT%"
 REM ============================================
 REM Step 1: Check prerequisites
 REM ============================================
-echo [1/5] Checking prerequisites...
+echo [1/4] Checking prerequisites...
 
 go version >nul 2>&1
 if errorlevel 1 (
@@ -34,7 +40,7 @@ echo.
 REM ============================================
 REM Step 2: Build React frontend
 REM ============================================
-echo [2/5] Building React frontend...
+echo [2/4] Building React frontend...
 
 cd "%ROOT%\web"
 
@@ -60,7 +66,7 @@ echo.
 REM ============================================
 REM Step 3: Copy frontend to embed location
 REM ============================================
-echo [3/5] Copying frontend to embed location...
+echo [3/4] Copying frontend to embed location...
 
 if exist "internal\server\web\dist" rmdir /s /q "internal\server\web\dist"
 if not exist "internal\server\web" mkdir "internal\server\web"
@@ -71,11 +77,17 @@ echo.
 REM ============================================
 REM Step 4: Build Go binary
 REM ============================================
-echo [4/5] Building Go binary...
+echo [4/4] Building Go binary...
 
 if not exist "build" mkdir "build"
 
-go build -ldflags "-s -w -H windowsgui" -o "build\qwelli.exe" ./cmd/qwelli
+if "%RELEASE%"=="1" (
+    echo   Mode: release
+    go build -ldflags "-s -w -H windowsgui" -o "build\qwelli.exe" ./cmd/qwelli
+) else (
+    echo   Mode: dev
+    go build -o "build\qwelli.exe" ./cmd/qwelli
+)
 if errorlevel 1 (
     echo X Build failed
     exit /b 1
@@ -83,28 +95,11 @@ if errorlevel 1 (
 echo   + build\qwelli.exe
 echo.
 
-REM ============================================
-REM Step 5: Create release package
-REM ============================================
-echo [5/5] Creating release package...
-
-if not exist "dist" mkdir "dist"
-copy "build\qwelli.exe" "dist\" >nul
-
-set "ZIP_NAME=qwelli-windows-amd64.zip"
-cd "dist"
-powershell -Command "Compress-Archive -Path 'qwelli.exe' -DestinationPath '..\%ZIP_NAME%' -Force"
-cd "%ROOT%"
-
-echo   + dist\qwelli.exe
-echo   + %ZIP_NAME%
-echo.
-
 echo ============================================
 echo   Build Complete!
 echo ============================================
 echo.
-echo   Run: dist\qwelli.exe serve
+echo   Run: build\qwelli.exe serve
 echo.
 
 exit /b 0
