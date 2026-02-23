@@ -35,6 +35,7 @@ func main() {
 		cli.NewListCmd(),
 		cli.NewStatusCmd(),
 		cli.NewDeleteCmd(),
+		cli.NewChatCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
