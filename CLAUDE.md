@@ -66,16 +66,17 @@ Uses **shadcn/ui** (Radix primitives + Tailwind CSS), **sonner** for toasts, and
 
 ```
 web/src/
-  api/          # Typed fetch wrapper (client.ts) + per-feature modules
-  types/        # TypeScript interfaces mirroring server/types.go
+  api/          # Typed fetch wrapper (client.ts) + per-feature modules (search, indexes, chat)
+  types/        # TypeScript interfaces mirroring server/types.go + chat event/message types
   contexts/     # AppContext (indexes, viewMode) + SearchContext (query, results, recent searches)
-  hooks/        # useTheme, useSSE, useResizable, useSearch, useIndexProgress, etc.
+  hooks/        # useTheme, useSSE, useResizable, useSearch, useIndexProgress, useChat, etc.
   components/
     ui/         # shadcn/ui generated components (Button, Dialog, Card, etc.)
     layout/     # AppLayout, Sidebar, TopBar, MainContent
     search/     # SearchForm, SearchResults, ResultCard, RecentSearches
     status/     # StatusView, StatusSummaryGrid, FileChangeList
     modals/     # NewIndexDialog, IndexProgressModal, FullTextModal, PDFPreviewModal
+    chat/       # ChatView, ChatMessage, ChatInput, ToolCallBlock
     screens/    # SetupScreen, QuitScreen
     terminal/   # TerminalPanel
   lib/          # cn() utility, format helpers
@@ -83,10 +84,13 @@ web/src/
 ```
 
 **Key patterns:**
-- **Contexts** use plain `useState` with setter functions exposed via context — no `useReducer`.
+- **Contexts** use plain `useState` with setter functions exposed via context — no `useReducer`. Context values are wrapped in `useMemo` to prevent unnecessary re-renders.
 - **Theme** uses Tailwind `dark:` variants and CSS variable classes (`bg-background`, `text-foreground`, `bg-muted`, etc.) instead of runtime `isDark` conditionals. The `.dark` class is toggled on `<html>` by `useTheme`.
-- **Search caching** — recent searches are stored in `SearchContext` (backed by localStorage, keyed by index path). This ensures a single shared state across all components.
-- **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support.
+- **API client** (`client.ts`) — typed `get`/`post`/`rawPost` wrappers accept an optional `AbortSignal` for request cancellation.
+- **Search** — in-flight requests are cancelled via `AbortController` when a new search starts or the component unmounts. Recent searches strip large fields (`imageData`, `content`) to keep localStorage lightweight. Recent searches are stored in `SearchContext` (backed by localStorage, keyed by index path).
+- **Chat** — `ChatView` pins the input at the bottom with a gradient fade. Auto-scroll only triggers when the user is near the bottom; a floating scroll-to-bottom button appears when scrolled up. `ToolCallBlock` uses Lucide icons with colored icon pills and CSS grid animated expand/collapse. SSE stream readers use `try/finally` to release locks.
+- **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support. EventSources are closed on unmount.
+- **Terminal** — logs are capped at 500 entries to prevent memory growth.
 - **Modals** — `FullTextModal` and `NewIndexDialog` use shadcn `Dialog`. `PDFPreviewModal` uses a plain overlay (shadcn Dialog's base classes conflict with the full-height flex layout needed for the PDF viewer).
 
 ### Server Patterns
@@ -189,6 +193,7 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Changing the embedding model requires re-creating the database (dimension is fixed at creation time). The service layer detects this automatically via `handleModelChange()`.
 - Files >500KB are skipped. OneDrive placeholder files are detected and skipped.
 - Never use `alert()` or `confirm()` in the frontend — use `toast` (sonner) and `AlertDialog` (shadcn).
+- Use Lucide icons in the frontend — never Unicode symbol characters for icons.
 - Never add `isDark` ternaries — use Tailwind `dark:` variants and CSS variable classes.
 - API calls go in `web/src/api/` modules, not inline in components.
 - Shared state goes in contexts, not prop-drilled through intermediate components.
