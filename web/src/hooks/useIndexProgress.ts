@@ -23,6 +23,8 @@ export function useIndexProgress() {
             setIsComplete(false);
             setPhase("");
 
+            // Close any existing EventSource before creating a new one
+            eventSourceRef.current?.close();
             const eventSource = new EventSource(
                 "/api/index/progress?path=" + encodeURIComponent(indexPath),
             );

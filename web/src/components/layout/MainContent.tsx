@@ -29,7 +29,7 @@ export function MainContent() {
 
     if (viewMode === "status") {
         return (
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
                 <div className="max-w-5xl mx-auto px-6 py-6">
                     <StatusView />
                 </div>
@@ -42,7 +42,7 @@ export function MainContent() {
     }
 
     return (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="max-w-5xl mx-auto px-6 py-6">
                 {!selectedIndex ? (
                     <div className="text-center text-muted-foreground py-20">

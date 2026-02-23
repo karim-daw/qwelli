@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
     Folder,
     Plus,
@@ -45,15 +45,19 @@ export function Sidebar({
     );
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-    const sortedIndexes = [...indexes].sort((a, b) => {
-        if (sortType === "alphabetical") {
-            return a.name.localeCompare(b.name);
-        }
-        return (
-            new Date(b.lastModified).getTime() -
-            new Date(a.lastModified).getTime()
-        );
-    });
+    const sortedIndexes = useMemo(
+        () =>
+            [...indexes].sort((a, b) => {
+                if (sortType === "alphabetical") {
+                    return a.name.localeCompare(b.name);
+                }
+                return (
+                    new Date(b.lastModified).getTime() -
+                    new Date(a.lastModified).getTime()
+                );
+            }),
+        [indexes, sortType],
+    );
 
     const handleSelectIndex = (index: Index) => {
         setSelectedIndex(index.path);

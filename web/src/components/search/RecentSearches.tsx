@@ -29,9 +29,9 @@ export function RecentSearches({
             </div>
 
             <div className="grid gap-3">
-                {searches.map((search, idx) => (
+                {searches.map((search) => (
                     <button
-                        key={idx}
+                        key={search.query + search.timestamp}
                         onClick={() => onLoadSearch(search)}
                         className="text-left border rounded-lg p-4 hover:border-border/80 hover:bg-accent/50 transition-all group"
                     >

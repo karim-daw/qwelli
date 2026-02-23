@@ -263,7 +263,7 @@ export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
             >
                 <div className="overflow-hidden">
                     <div className="ml-12 border-t border-border/50 mt-1">
-                        <pre className="text-xs font-mono p-3 max-h-80 overflow-y-auto text-muted-foreground whitespace-pre-wrap break-words">
+                        <pre className="text-xs font-mono p-3 max-h-80 overflow-y-auto custom-scrollbar text-muted-foreground whitespace-pre-wrap break-words">
                             {hasResult && formatResultFull(toolCall.result!)}
                         </pre>
                     </div>

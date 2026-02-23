@@ -91,12 +91,12 @@ export function TerminalPanel({
                     </p>
                 ) : (
                     <div>
-                        {logs.map((log, index) => {
+                        {logs.map((log) => {
                             const timestamp = new Date(
                                 log.timestamp,
                             ).toLocaleTimeString();
                             return (
-                                <p key={index} className={getLogColor(log.level)}>
+                                <p key={log.id} className={getLogColor(log.level)}>
                                     <span className="text-muted-foreground">
                                         [{timestamp}]
                                     </span>{" "}
