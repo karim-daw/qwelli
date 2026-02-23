@@ -153,3 +153,4 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Never add `isDark` ternaries — use Tailwind `dark:` variants and CSS variable classes.
 - API calls go in `web/src/api/` modules, not inline in components.
 - Shared state goes in contexts, not prop-drilled through intermediate components.
+- Always use `--admin` flag when merging PRs with `gh pr merge`.
