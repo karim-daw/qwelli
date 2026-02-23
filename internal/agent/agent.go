@@ -49,12 +49,15 @@ func New(endpoint, apiKey, model string, svc *service.Service, indexPath string)
 	)
 
 	systemPrompt := fmt.Sprintf(`You are a research assistant with access to a document collection indexed by Qwelli.
-You can search the collection, check its status, read text files, and list directories.
+You can search the collection, find files, read their content, check index status, and manage the index.
 
 When answering questions:
 - Run multiple searches with different queries and strategies to be thorough
+- Use find_files to discover documents by type, date, or name before searching content
 - Cite specific files and page numbers in your answers
-- If a search preview isn't enough, read the full text file
+- For PDFs and scanned documents, use get_file_chunks to read the full indexed text
+- For text files (txt, md, csv, etc.), use read_file for the raw content
+- Use get_file_info to quickly check a file's metadata and chunk count
 - Ask clarifying questions when the request is ambiguous
 - Synthesize across multiple sources, don't just dump search results
 

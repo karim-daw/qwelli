@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/karim-daw/qwelli/internal/engine"
@@ -49,7 +50,7 @@ func toolDefs() []anthropic.ToolUnionParam {
 		}},
 		{OfTool: &anthropic.ToolParam{
 			Name:        "read_file",
-			Description: anthropic.String("Read the full text contents of a file within the indexed folder. Only works for text-based files (not PDFs or images). Use search to find content in PDFs."),
+			Description: anthropic.String("Read the full text contents of a file within the indexed folder. Only works for text-based files (not PDFs or images). For PDFs, use get_file_chunks to read the indexed text content."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{
 					"path": map[string]any{
@@ -82,7 +83,7 @@ func toolDefs() []anthropic.ToolUnionParam {
 		}},
 		{OfTool: &anthropic.ToolParam{
 			Name:        "get_file_chunks",
-			Description: anthropic.String("Get all indexed chunks for a specific file. Shows how the file was split during indexing — chunk index, total chunks, page numbers, and text content. Useful for understanding document structure or reading a file's full indexed content in order."),
+			Description: anthropic.String("Get all indexed chunks for a specific file with full content. This is the primary way to read PDF and image document content — it returns the extracted text from indexing. Chunks are returned in order with page numbers."),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: map[string]any{
 					"path": map[string]any{
@@ -91,6 +92,51 @@ func toolDefs() []anthropic.ToolUnionParam {
 					},
 				},
 				Required: []string{"path"},
+			},
+		}},
+		{OfTool: &anthropic.ToolParam{
+			Name:        "get_file_info",
+			Description: anthropic.String("Get metadata for a single indexed file — file type, size, modification date, when it was indexed, and how many chunks it was split into. Quick lookup without reading content."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Absolute path to the file. Must be within the indexed folder.",
+					},
+				},
+				Required: []string{"path"},
+			},
+		}},
+		{OfTool: &anthropic.ToolParam{
+			Name:        "find_files",
+			Description: anthropic.String("Search the file index with filters. Find files by type (pdf, txt, md, etc.), name pattern, modification date range, or subfolder. Returns matching files with metadata. Much faster than listing directories — queries the index database directly."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"file_type": map[string]any{
+						"type":        "string",
+						"description": "Filter by file extension (e.g. \"pdf\", \"txt\", \"md\", \"docx\"). Without the dot.",
+					},
+					"name_contains": map[string]any{
+						"type":        "string",
+						"description": "Filter by filename containing this substring (case-insensitive).",
+					},
+					"modified_after": map[string]any{
+						"type":        "string",
+						"description": "Only files modified after this date (YYYY-MM-DD format).",
+					},
+					"modified_before": map[string]any{
+						"type":        "string",
+						"description": "Only files modified before this date (YYYY-MM-DD format).",
+					},
+					"subfolder": map[string]any{
+						"type":        "string",
+						"description": "Only files within this subfolder path (relative to index root or absolute).",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum number of results (default: 50).",
+					},
+				},
 			},
 		}},
 	}
@@ -112,6 +158,10 @@ func executeTool(ctx context.Context, svc *service.Service, indexPath, dbPath, n
 		return execIndexUpdate(ctx, svc, indexPath)
 	case "get_file_chunks":
 		return execGetFileChunks(svc, indexPath, rawInput)
+	case "get_file_info":
+		return execGetFileInfo(svc, indexPath, rawInput)
+	case "find_files":
+		return execFindFiles(svc, indexPath, rawInput)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -126,11 +176,11 @@ type searchInput struct {
 }
 
 type searchResultJSON struct {
-	FilePath    string `json:"file_path"`
-	FileName    string `json:"file_name"`
+	FilePath    string  `json:"file_path"`
+	FileName    string  `json:"file_name"`
 	Distance    float64 `json:"distance"`
-	Preview     string `json:"preview"`
-	PageNumbers []int  `json:"page_numbers,omitempty"`
+	Preview     string  `json:"preview"`
+	PageNumbers []int   `json:"page_numbers,omitempty"`
 }
 
 func execSearch(svc *service.Service, dbPath string, rawInput json.RawMessage) (string, bool) {
@@ -265,9 +315,9 @@ func execReadFile(indexPath string, rawInput json.RawMessage) (string, bool) {
 	ext := strings.ToLower(filepath.Ext(absPath))
 	switch ext {
 	case ".pdf":
-		return "cannot read PDF files directly — use the search tool to find content within PDFs", true
+		return "cannot read PDF files directly — use get_file_chunks to read the indexed text content of PDFs", true
 	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".ico", ".webp":
-		return "cannot read image files — use the search tool to find content about images", true
+		return "cannot read image files — use search or get_file_chunks to access indexed content", true
 	case ".exe", ".dll", ".so", ".dylib", ".bin", ".zip", ".gz", ".tar", ".rar", ".7z":
 		return "cannot read binary files", true
 	}
@@ -368,7 +418,6 @@ func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.Raw
 		return "path is required", true
 	}
 
-	// Security: ensure path is within the indexed folder
 	absPath, err := filepath.Abs(in.Path)
 	if err != nil {
 		return fmt.Sprintf("invalid path: %v", err), true
@@ -404,19 +453,203 @@ func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.Raw
 
 	out := make([]chunkJSON, 0, len(chunks))
 	for _, c := range chunks {
-		content := c.Content
-		if len(content) > 1000 {
-			content = content[:1000] + "..."
-		}
 		out = append(out, chunkJSON{
 			ChunkIndex:  c.ChunkIndex,
 			TotalChunks: c.TotalChunks,
-			Content:     content,
+			Content:     c.Content, // full content — no truncation
 			PageNumbers: c.PageNumbers,
 			ContentType: c.ContentType,
 		})
 	}
 
 	data, _ := json.Marshal(out)
+	return string(data), false
+}
+
+func execGetFileInfo(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	var in filePathInput
+	if err := json.Unmarshal(rawInput, &in); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true
+	}
+	if in.Path == "" {
+		return "path is required", true
+	}
+
+	absPath, err := filepath.Abs(in.Path)
+	if err != nil {
+		return fmt.Sprintf("invalid path: %v", err), true
+	}
+	absIndex, _ := filepath.Abs(indexPath)
+	if !strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absIndex)+string(filepath.Separator)) {
+		return fmt.Sprintf("access denied: path must be within %s", indexPath), true
+	}
+
+	projectDB, err := svc.OpenDB(indexPath)
+	if err != nil {
+		return fmt.Sprintf("failed to open index: %v", err), true
+	}
+	defer projectDB.Close()
+
+	file, err := projectDB.GetFileByPath(absPath)
+	if err != nil {
+		return fmt.Sprintf("file not found in index: %s", filepath.Base(absPath)), true
+	}
+
+	chunks, err := projectDB.GetChunksForFile(file.FileID)
+	if err != nil {
+		return fmt.Sprintf("failed to get chunks: %v", err), true
+	}
+
+	result := map[string]any{
+		"path":        file.Path,
+		"file_name":   filepath.Base(file.Path),
+		"file_type":   file.FileType,
+		"size_bytes":  file.Size,
+		"modified_at": file.ModifiedAt.Format(time.RFC3339),
+		"indexed_at":  file.IndexedAt.Format(time.RFC3339),
+		"chunk_count": len(chunks),
+	}
+
+	// Summarize content types if mixed
+	textChunks, imageChunks := 0, 0
+	for _, c := range chunks {
+		if c.ContentType == "image" {
+			imageChunks++
+		} else {
+			textChunks++
+		}
+	}
+	if imageChunks > 0 {
+		result["text_chunks"] = textChunks
+		result["image_chunks"] = imageChunks
+	}
+
+	data, _ := json.Marshal(result)
+	return string(data), false
+}
+
+type findFilesInput struct {
+	FileType      string `json:"file_type"`
+	NameContains  string `json:"name_contains"`
+	ModifiedAfter string `json:"modified_after"`
+	ModifiedBefore string `json:"modified_before"`
+	Subfolder     string `json:"subfolder"`
+	Limit         int    `json:"limit"`
+}
+
+func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	var in findFilesInput
+	if err := json.Unmarshal(rawInput, &in); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true
+	}
+	if in.Limit <= 0 {
+		in.Limit = 50
+	}
+	if in.Limit > 200 {
+		in.Limit = 200
+	}
+
+	projectDB, err := svc.OpenDB(indexPath)
+	if err != nil {
+		return fmt.Sprintf("failed to open index: %v", err), true
+	}
+	defer projectDB.Close()
+
+	allFiles, err := projectDB.GetAllFiles()
+	if err != nil {
+		return fmt.Sprintf("failed to query files: %v", err), true
+	}
+
+	// Parse date filters
+	var afterTime, beforeTime time.Time
+	if in.ModifiedAfter != "" {
+		if t, err := time.Parse("2006-01-02", in.ModifiedAfter); err == nil {
+			afterTime = t
+		} else {
+			return fmt.Sprintf("invalid modified_after date format (use YYYY-MM-DD): %v", err), true
+		}
+	}
+	if in.ModifiedBefore != "" {
+		if t, err := time.Parse("2006-01-02", in.ModifiedBefore); err == nil {
+			beforeTime = t.Add(24 * time.Hour) // include the full day
+		} else {
+			return fmt.Sprintf("invalid modified_before date format (use YYYY-MM-DD): %v", err), true
+		}
+	}
+
+	// Resolve subfolder filter
+	var subfolderAbs string
+	if in.Subfolder != "" {
+		if filepath.IsAbs(in.Subfolder) {
+			subfolderAbs = strings.ToLower(in.Subfolder)
+		} else {
+			subfolderAbs = strings.ToLower(filepath.Join(indexPath, in.Subfolder))
+		}
+	}
+
+	type fileResult struct {
+		Path       string `json:"path"`
+		FileName   string `json:"file_name"`
+		FileType   string `json:"file_type"`
+		SizeBytes  int64  `json:"size_bytes"`
+		ModifiedAt string `json:"modified_at"`
+	}
+
+	var results []fileResult
+	for _, f := range allFiles {
+		// Filter by file type
+		if in.FileType != "" {
+			ft := strings.TrimPrefix(in.FileType, ".")
+			if !strings.EqualFold(f.FileType, ft) {
+				continue
+			}
+		}
+
+		// Filter by name
+		if in.NameContains != "" {
+			if !strings.Contains(strings.ToLower(filepath.Base(f.Path)), strings.ToLower(in.NameContains)) {
+				continue
+			}
+		}
+
+		// Filter by date
+		if !afterTime.IsZero() && f.ModifiedAt.Before(afterTime) {
+			continue
+		}
+		if !beforeTime.IsZero() && f.ModifiedAt.After(beforeTime) {
+			continue
+		}
+
+		// Filter by subfolder
+		if subfolderAbs != "" {
+			if !strings.HasPrefix(strings.ToLower(f.Path), subfolderAbs+string(filepath.Separator)) &&
+				!strings.EqualFold(filepath.Dir(f.Path), subfolderAbs) {
+				continue
+			}
+		}
+
+		results = append(results, fileResult{
+			Path:       f.Path,
+			FileName:   filepath.Base(f.Path),
+			FileType:   f.FileType,
+			SizeBytes:  f.Size,
+			ModifiedAt: f.ModifiedAt.Format("2006-01-02"),
+		})
+
+		if len(results) >= in.Limit {
+			break
+		}
+	}
+
+	wrapper := map[string]any{
+		"total_matches": len(results),
+		"files":         results,
+	}
+	if len(results) >= in.Limit {
+		wrapper["truncated"] = true
+		wrapper["message"] = fmt.Sprintf("showing first %d results — narrow your filters for more specific results", in.Limit)
+	}
+
+	data, _ := json.Marshal(wrapper)
 	return string(data), false
 }
