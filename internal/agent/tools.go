@@ -80,6 +80,19 @@ func toolDefs() []anthropic.ToolUnionParam {
 				Properties: map[string]any{},
 			},
 		}},
+		{OfTool: &anthropic.ToolParam{
+			Name:        "get_file_chunks",
+			Description: anthropic.String("Get all indexed chunks for a specific file. Shows how the file was split during indexing — chunk index, total chunks, page numbers, and text content. Useful for understanding document structure or reading a file's full indexed content in order."),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Absolute path to the file. Must be within the indexed folder.",
+					},
+				},
+				Required: []string{"path"},
+			},
+		}},
 	}
 }
 
@@ -97,6 +110,8 @@ func executeTool(ctx context.Context, svc *service.Service, indexPath, dbPath, n
 		return execListDir(indexPath, rawInput)
 	case "index_update":
 		return execIndexUpdate(ctx, svc, indexPath)
+	case "get_file_chunks":
+		return execGetFileChunks(svc, indexPath, rawInput)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -342,4 +357,66 @@ func execIndexUpdate(ctx context.Context, svc *service.Service, indexPath string
 		return "index is already up to date — no changes detected", false
 	}
 	return fmt.Sprintf("index updated successfully — processed %d files", processed), false
+}
+
+func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	var in filePathInput
+	if err := json.Unmarshal(rawInput, &in); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true
+	}
+	if in.Path == "" {
+		return "path is required", true
+	}
+
+	// Security: ensure path is within the indexed folder
+	absPath, err := filepath.Abs(in.Path)
+	if err != nil {
+		return fmt.Sprintf("invalid path: %v", err), true
+	}
+	absIndex, _ := filepath.Abs(indexPath)
+	if !strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absIndex)+string(filepath.Separator)) {
+		return fmt.Sprintf("access denied: path must be within %s", indexPath), true
+	}
+
+	projectDB, err := svc.OpenDB(indexPath)
+	if err != nil {
+		return fmt.Sprintf("failed to open index: %v", err), true
+	}
+	defer projectDB.Close()
+
+	file, err := projectDB.GetFileByPath(absPath)
+	if err != nil {
+		return fmt.Sprintf("file not found in index: %s", filepath.Base(absPath)), true
+	}
+
+	chunks, err := projectDB.GetChunksForFile(file.FileID)
+	if err != nil {
+		return fmt.Sprintf("failed to get chunks: %v", err), true
+	}
+
+	type chunkJSON struct {
+		ChunkIndex  int    `json:"chunk_index"`
+		TotalChunks int    `json:"total_chunks"`
+		Content     string `json:"content"`
+		PageNumbers []int  `json:"page_numbers,omitempty"`
+		ContentType string `json:"content_type"`
+	}
+
+	out := make([]chunkJSON, 0, len(chunks))
+	for _, c := range chunks {
+		content := c.Content
+		if len(content) > 1000 {
+			content = content[:1000] + "..."
+		}
+		out = append(out, chunkJSON{
+			ChunkIndex:  c.ChunkIndex,
+			TotalChunks: c.TotalChunks,
+			Content:     content,
+			PageNumbers: c.PageNumbers,
+			ContentType: c.ContentType,
+		})
+	}
+
+	data, _ := json.Marshal(out)
+	return string(data), false
 }
