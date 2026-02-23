@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/karim-daw/qwelli/internal/agent"
 	"github.com/karim-daw/qwelli/internal/service"
 )
 
@@ -37,6 +38,10 @@ type Server struct {
 	// Background indexing cancellation
 	cancelFuncs map[string]context.CancelFunc
 	cancelMutex sync.RWMutex
+
+	// Chat agent sessions (one per index)
+	chatAgents map[string]*agent.Agent
+	chatMutex  sync.RWMutex
 }
 
 // NewServer creates a server with an injected service (and port).
@@ -49,6 +54,7 @@ func NewServer(svc *service.Service, port int) *Server {
 		searchCache:     make(map[string]*searchCacheEntry),
 		cacheTTL:        5 * time.Minute,
 		cancelFuncs:     make(map[string]context.CancelFunc),
+		chatAgents:      make(map[string]*agent.Agent),
 	}
 	go s.cleanupExpiredCache()
 	return s
@@ -84,6 +90,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/open-folder", s.handleOpenFolder)
 	mux.HandleFunc("/api/open-file-location", s.handleOpenFileLocation)
 	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
+	mux.HandleFunc("/api/chat", s.handleChat)
+	mux.HandleFunc("/api/chat/clear", s.handleChatClear)
 	mux.HandleFunc("/api/shutdown", s.handleShutdown)
 	mux.HandleFunc("/api/setup/status", handleSetupStatus)
 
