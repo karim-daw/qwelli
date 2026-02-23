@@ -185,6 +185,16 @@ func (s *Service) ListIndexes() ([]IndexInfo, error) {
 
 			meta, err := db.ReadIndexMeta(dbFile)
 			if err != nil {
+				// DB temporarily inaccessible — include stub so it doesn't vanish from the sidebar
+				folder := strings.TrimSuffix(filepath.Base(dbFile), ".db")
+				if info, err2 := os.Stat(dbFile); err2 == nil {
+					mu.Lock()
+					indexes = append(indexes, IndexInfo{
+						FolderPath: folder, DBPath: dbFile,
+						SizeBytes: info.Size(), LastModified: info.ModTime(),
+					})
+					mu.Unlock()
+				}
 				return
 			}
 
