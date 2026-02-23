@@ -1,22 +1,29 @@
 # Qwelli
 
-Local semantic file search using vector embeddings. Index your folders and find files by meaning, not keywords. Comes with a built-in web UI.
+Local semantic file search using vector embeddings. Index your folders and find files by meaning, not keywords. Comes with a built-in web UI and an AI chat agent for natural-language questions about your documents.
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-- Go 1.21+
+- Go 1.25+ with CGO enabled
 - Node.js 18+ (for building the web UI)
 - Voyage AI API key ([get one here](https://dash.voyageai.com/))
 
 ### 2. Build
 
 ```bash
-# Build with embedded web UI (recommended)
-./scripts/build-with-ui.sh
+# Full build: frontend + Go binary (Linux/Mac)
+./scripts/build.sh
 
-# Or build Go binary only (if web/dist already exists)
+# Full build: frontend + Go binary (Windows)
+scripts\build.bat
+
+# Release build (stripped, no console window on Windows)
+./scripts/build.sh --release
+scripts\build.bat --release
+
+# Build Go binary only (requires web/dist to exist)
 go build -o qwelli ./cmd/qwelli
 ```
 
@@ -33,30 +40,16 @@ go build -o qwelli ./cmd/qwelli
 
 On first launch, the browser opens to a setup screen where you enter your Voyage AI API key. After that, you're ready to index and search.
 
-## Windows Distribution
+## Windows
 
-Build a Windows `.exe` from Linux/WSL for sharing with colleagues:
-
-```bash
-./scripts/build-release.sh
-```
-
-This produces `qwelli-windows-amd64.zip` containing:
-- `qwelli.exe` -- double-click to launch (no console window)
-- `duckdb.dll` -- required runtime library (must stay next to the exe)
-
-The colleague extracts the zip, double-clicks `qwelli.exe`, and the browser opens. First launch shows a setup screen for the API key.
-
-> **Note:** Cross-compiling from Linux requires `gcc-mingw-w64-x86-64` (the script installs it automatically). Building natively on Windows produces a single `.exe` with DuckDB statically linked.
-
-### Building natively on Windows
-
-If building on Windows directly (single `.exe`, no DLL needed):
+Building natively on Windows produces a single `.exe` with DuckDB statically linked — no separate DLL needed.
 
 1. Install MSYS2 from https://www.msys2.org/
 2. Run `pacman -S mingw-w64-ucrt-x86_64-gcc` in MSYS2
 3. Add `C:\msys64\ucrt64\bin` to PATH
-4. Run `scripts\build-with-ui.bat`
+4. Run `scripts\build.bat`
+
+> **Note:** Cross-compiling from Linux requires `gcc-mingw-w64-x86-64` and produces a `.exe` + `duckdb.dll` pair instead of a single binary.
 
 ## CLI Usage
 
@@ -85,7 +78,47 @@ qwelli shell
 
 # Start web UI
 qwelli serve
+
+# AI chat about your documents (requires Foundry config)
+qwelli chat --index ~/Documents/project
 ```
+
+## AI Chat
+
+`qwelli chat` is an interactive AI agent that answers natural-language questions about your indexed documents. It uses Claude on Azure AI Foundry and has access to your document index through a set of tools.
+
+### Setup
+
+Set the following environment variables (or add them to `~/.qwelli/config.yaml`):
+
+```bash
+export FOUNDRY_ENDPOINT="https://your-endpoint.azure.com"
+export FOUNDRY_API_KEY="your-api-key"
+export FOUNDRY_MODEL="claude-sonnet-4-6"  # default
+```
+
+### Usage
+
+```bash
+qwelli chat --index ~/Documents/project
+```
+
+This starts a REPL where you can ask questions like "What files discuss authentication?" or "Summarize the PDF reports from last month." Press Ctrl+C to cancel a response.
+
+### Agent Tools
+
+The agent has access to 8 tools that operate on your indexed collection:
+
+| Tool | Description |
+|------|-------------|
+| `search` | Semantic, keyword, or hybrid search across indexed documents |
+| `status` | Check index status — total files, pending changes |
+| `read_file` | Read full text contents of a file (text files only) |
+| `list_dir` | List directory contents within the indexed folder |
+| `index_update` | Incremental re-index to pick up new/modified/deleted files |
+| `get_file_chunks` | Get all indexed chunks for a file, including PDFs |
+| `get_file_info` | File metadata — type, size, dates, chunk count |
+| `find_files` | Query indexed files by type, name pattern, date range, subfolder |
 
 ## Web UI Features
 
@@ -109,11 +142,11 @@ qwelli serve
 
 ## Supported File Types
 
-**Text:** `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.rs`, `.rb`, `.php`, `.html`, `.css`, `.yaml`, `.yml`, `.toml`, `.sh`, `.json`, `.proto`, `.graphql`
+**Text:** `.txt`, `.md`, `.go`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.java`, `.c`, `.cpp`, `.h`, `.rs`, `.rb`, `.php`, `.cs`, `.swift`, `.html`, `.css`, `.scss`, `.yaml`, `.yml`, `.toml`, `.sh`, `.proto`, `.graphql`
 
 **PDF:** Full text extraction with optional image extraction from pages
 
-**Images:** Image embeddings via multimodal model (from PDFs)
+**Images:** `.jpg`, `.jpeg`, `.png`, `.gif` — standalone image files embedded via multimodal model
 
 Files >500KB and hidden files/folders are skipped.
 
@@ -131,6 +164,9 @@ Environment variables override config file values:
 | `VOYAGE_RERANK_MODEL` | Reranker model |
 | `VOYAGE_RERANK_ENDPOINT` | Reranker endpoint |
 | `ENABLE_RERANKER` | Enable/disable reranking (`true`/`false`) |
+| `FOUNDRY_ENDPOINT` | Azure AI Foundry base URL (required for `qwelli chat`) |
+| `FOUNDRY_API_KEY` | Foundry API key (required for `qwelli chat`) |
+| `FOUNDRY_MODEL` | Foundry deployment name (default: `claude-sonnet-4-6`) |
 
 ## Data Storage
 
@@ -154,7 +190,8 @@ Each indexed folder gets its own DuckDB database with HNSW vector index.
 qwelli/
 ├── cmd/qwelli/          # CLI entry point
 ├── internal/
-│   ├── cli/             # Commands (init, index, search, serve, shell, etc.)
+│   ├── agent/           # AI chat agent (tool definitions, streaming loop)
+│   ├── cli/             # Commands (init, index, search, serve, shell, chat, etc.)
 │   ├── config/          # YAML config + env var loading
 │   ├── db/              # DuckDB wrapper, HNSW index, FTS search
 │   ├── engine/          # Core business logic
