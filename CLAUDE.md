@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Qwelli is a local semantic file search engine. It indexes folders using Voyage AI embeddings (default model: `voyage-multimodal-3`) and stores them in DuckDB with HNSW vector search. It ships as a single binary with an embedded React web UI.
+Qwelli is a local semantic file search engine. It indexes folders using Voyage AI embeddings (default model: `voyage-multimodal-3`) and stores them in DuckDB with HNSW vector search. It ships as a single binary with an embedded React web UI. It also includes a standalone AI agent (`qwelli chat`) that lets users ask natural-language questions about their indexed document collections using Claude on Azure AI Foundry.
 
 ## Build & Test Commands
 
@@ -103,15 +103,42 @@ web/src/
 
 Files are scanned, text/images extracted (with parallel workers), embeddings generated via Voyage API in batches, stored in DuckDB, then the HNSW index is rebuilt if embeddings changed.
 
+### Agent Architecture
+
+```
+User ↔ CLI (chat.go) ↔ Agent Loop (internal/agent/) ↔ Azure AI Foundry
+                                    ↕                    (Claude via Anthropic SDK)
+                              Tool Executor
+                         ┌──────┼──────┐
+                      Service  Filesystem  DB
+```
+
+- **Agent loop** (`internal/agent/agent.go`) — streaming tool-use loop using `anthropic-sdk-go`. Calls `Messages.NewStreaming()`, accumulates events, dispatches tool calls, sends results back, repeats until text-only response.
+- **Tools** (`internal/agent/tools.go`) — 8 tools that map to existing service/DB/filesystem operations:
+  - `search` — semantic/keyword/hybrid search via `svc.SearchByDBPath()`
+  - `status` — index status via `svc.GetIndexStatus()`
+  - `read_file` — text file contents (rejects PDFs/binaries, security-bounded to index folder)
+  - `list_dir` — directory listing within index folder
+  - `index_update` — incremental re-index via `svc.UpdateIndex()`
+  - `get_file_chunks` — full indexed content of any file (including PDFs) via `projectDB.GetChunksForFile()`
+  - `get_file_info` — single-file metadata + chunk count from the index DB
+  - `find_files` — query indexed files by type, name pattern, date range, subfolder
+- **CLI** (`internal/cli/chat.go`) — `qwelli chat --index <path>` REPL with Ctrl+C per-turn cancellation.
+- **Config** — `FOUNDRY_ENDPOINT`, `FOUNDRY_API_KEY`, `FOUNDRY_MODEL` env vars or `config.yaml` fields.
+
 ## Environment Variables
 
 ```bash
-VOYAGE_API_KEY=...              # Required
+VOYAGE_API_KEY=...              # Required for indexing/search
 VOYAGE_MODEL=voyage-multimodal-3  # Embedding model (default)
 VOYAGE_EMBEDDING_ENDPOINT=...  # API endpoint
 VOYAGE_RERANK_MODEL=...        # Optional reranker
 VOYAGE_RERANK_ENDPOINT=...     # Optional reranker endpoint
 ENABLE_RERANKER=true           # Enable/disable reranking
+
+FOUNDRY_ENDPOINT=...           # Required for `qwelli chat` (Azure AI Foundry base URL)
+FOUNDRY_API_KEY=...            # Required for `qwelli chat`
+FOUNDRY_MODEL=claude-sonnet-4-6  # Foundry deployment name (default)
 ```
 
 Environment variables override `~/.qwelli/config.yaml` values.
@@ -141,6 +168,14 @@ Environment variables override `~/.qwelli/config.yaml` values.
 2. Register route in `server.go` `setupRoutes()`
 3. Add request/response types to `types.go` if needed
 
+## Adding an Agent Tool
+
+1. Add tool definition in `internal/agent/tools.go` `toolDefs()` — use `anthropic.ToolParam` with `Name`, `Description`, and `InputSchema` (JSON Schema)
+2. Add dispatch case in `executeTool()` switch
+3. Implement `exec<ToolName>()` function — takes raw JSON input, validates, calls service/DB/filesystem, returns `(string, bool)` (result, isError)
+4. Security: all file/directory tools must validate paths are within the indexed folder
+5. Update system prompt in `internal/agent/agent.go` to guide the agent on when to use the new tool
+
 ## Testing Notes
 
 - Tests requiring `VOYAGE_API_KEY` use `t.Skip()` when the key is missing — never `t.Fatal()`.
@@ -157,4 +192,7 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Never add `isDark` ternaries — use Tailwind `dark:` variants and CSS variable classes.
 - API calls go in `web/src/api/` modules, not inline in components.
 - Shared state goes in contexts, not prop-drilled through intermediate components.
+- Agent tools must security-bound all file/directory access to the indexed folder path.
+- Agent tool results are strings — use JSON for structured data, plain text for file contents.
+- The Anthropic SDK `NewClient()` returns by value (not pointer) — `anthropic.Client`, not `*anthropic.Client`.
 - Always use `--admin` flag when merging PRs with `gh pr merge`.
