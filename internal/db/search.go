@@ -12,7 +12,8 @@ func (p *ProjectDB) ensureHNSWPersistence() error {
 	return err
 }
 
-// BuildHNSWIndex creates the HNSW index if embeddings exist
+// BuildHNSWIndex creates the HNSW index if embeddings exist.
+// Uses M=12, ef_construction=64 for better recall than DuckDB defaults (M=5, ef_construction=40).
 func (p *ProjectDB) BuildHNSWIndex() error {
 	var count int
 	if err := p.conn.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count); err != nil {
@@ -24,11 +25,11 @@ func (p *ProjectDB) BuildHNSWIndex() error {
 	if err := p.ensureHNSWPersistence(); err != nil {
 		return fmt.Errorf("ensure HNSW persistence: %w", err)
 	}
-	_, err := p.conn.Exec(`CREATE INDEX IF NOT EXISTS hnsw_idx ON embeddings USING HNSW (vector) WITH (metric = 'cosine')`)
+	_, err := p.conn.Exec(`CREATE INDEX IF NOT EXISTS hnsw_idx ON embeddings USING HNSW (vector) WITH (metric = 'cosine', M = 12, ef_construction = 64)`)
 	return err
 }
 
-// RebuildHNSWIndex drops and recreates the HNSW index, clearing any stale flag.
+// RebuildHNSWIndex drops and recreates the HNSW index.
 func (p *ProjectDB) RebuildHNSWIndex() error {
 	if _, err := p.conn.Exec("DROP INDEX IF EXISTS hnsw_idx"); err != nil {
 		return fmt.Errorf("drop HNSW index: %w", err)
@@ -44,7 +45,7 @@ func (p *ProjectDB) RebuildHNSWIndex() error {
 	if err := p.ensureHNSWPersistence(); err != nil {
 		return fmt.Errorf("ensure HNSW persistence: %w", err)
 	}
-	if _, err := p.conn.Exec(`CREATE INDEX hnsw_idx ON embeddings USING HNSW(vector) WITH (metric='cosine')`); err != nil {
+	if _, err := p.conn.Exec(`CREATE INDEX hnsw_idx ON embeddings USING HNSW(vector) WITH (metric='cosine', M=12, ef_construction=64)`); err != nil {
 		return fmt.Errorf("create HNSW index: %w", err)
 	}
 	_ = p.SetMetadata("hnsw_stale", "false")

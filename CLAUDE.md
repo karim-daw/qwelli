@@ -50,7 +50,7 @@ CLI/Server → Service → Engine → DB
 
 - **Service layer** (`internal/service/`) owns DB lifecycle. CLI and server code never open databases directly — they call `service.Load()` or `service.New()`.
 - **Engine** (`internal/engine/engine.go`) receives `*db.ProjectDB` from callers. It coordinates file processing, embedding, and search but doesn't manage connections.
-- **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries.
+- **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries. `ReadIndexMeta()` is a lightweight read-only path (no VSS, no schema DDL) used by `ListIndexes()` to read only `folder_path` and chunk count — do not replace it with `OpenProjectDB()` calls in listing code.
 
 ### Key Interfaces
 
@@ -96,6 +96,7 @@ web/src/
 ### Server Patterns
 
 - **Port resolution** (`listener.go`): `ResolveListener(port, portExplicit)` binds the socket before the server starts. Default port (8080) auto-falls back to an OS-assigned port if busy; explicit `--port` fails with a clear error. Both `Server` and `SetupServer` expose a `Listen(portExplicit)` method — call it before `Start()`. The listener-first approach also eliminates the need for `time.Sleep` before opening the browser.
+- **`GET /api/indexes`** (`ListIndexes`) opens all `.db` files in parallel via `db.ReadIndexMeta()` (read-only, no VSS load). Do not revert to serial `OpenProjectDB()` calls — that path takes ~140ms per file.
 - SSE (Server-Sent Events) for real-time indexing progress (`/api/index/progress`) and terminal output (`/api/terminal/stream`).
 - Search results cached in-memory with 5-minute TTL.
 - Background indexing with cancellation support via context.

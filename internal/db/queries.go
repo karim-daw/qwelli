@@ -92,6 +92,76 @@ func (p *ProjectDB) GetAllFiles() ([]File, error) {
 	return files, nil
 }
 
+// FindFilesFilter holds SQL-pushable predicates for FindFiles.
+type FindFilesFilter struct {
+	FileType       string    // exact match on file_type (e.g. "pdf")
+	NameContains   string    // case-insensitive substring on the file basename
+	ModifiedAfter  time.Time // zero = no lower bound
+	ModifiedBefore time.Time // zero = no upper bound
+	SubfolderAbs   string    // absolute path prefix; empty = no filter
+	Limit          int       // 0 → caller should set a sensible default
+}
+
+// FindFiles queries the files table with filters pushed into SQL.
+// Only columns from the files table are accessed — no full-table scan is needed.
+func (p *ProjectDB) FindFiles(f FindFilesFilter) ([]File, error) {
+	var conditions []string
+	var args []interface{}
+	n := 1
+
+	if f.FileType != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(file_type) = LOWER($%d)", n))
+		args = append(args, f.FileType)
+		n++
+	}
+	if f.NameContains != "" {
+		conditions = append(conditions, fmt.Sprintf("CONTAINS(LOWER(path), LOWER($%d))", n))
+		args = append(args, f.NameContains)
+		n++
+	}
+	if !f.ModifiedAfter.IsZero() {
+		conditions = append(conditions, fmt.Sprintf("modified_at >= $%d", n))
+		args = append(args, f.ModifiedAfter.Format("2006-01-02 15:04:05"))
+		n++
+	}
+	if !f.ModifiedBefore.IsZero() {
+		conditions = append(conditions, fmt.Sprintf("modified_at < $%d", n))
+		args = append(args, f.ModifiedBefore.Format("2006-01-02 15:04:05"))
+		n++
+	}
+	if f.SubfolderAbs != "" {
+		// DuckDB's STARTS_WITH is case-sensitive; use LOWER on both sides
+		conditions = append(conditions, fmt.Sprintf("STARTS_WITH(LOWER(path), LOWER($%d))", n))
+		args = append(args, f.SubfolderAbs)
+		n++
+	}
+
+	query := `SELECT ` + fileColumns + ` FROM files`
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, " AND ")
+	}
+	query += ` ORDER BY path`
+	if f.Limit > 0 {
+		query += fmt.Sprintf(` LIMIT %d`, f.Limit)
+	}
+
+	rows, err := p.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var files []File
+	for rows.Next() {
+		file, err := scanFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, *file)
+	}
+	return files, nil
+}
+
 // ClearAllData removes all files, chunks, and embeddings for a full re-index.
 // The HNSW index is also dropped since all embeddings are deleted.
 func (p *ProjectDB) ClearAllData() error {
@@ -286,6 +356,13 @@ func (p *ProjectDB) AppendChunksAndEmbeddings(chunks []Chunk, embeddings map[int
 	})
 }
 
+// AnalyzeStats refreshes DuckDB column statistics so the query planner makes
+// better decisions after large bulk inserts.
+func (p *ProjectDB) AnalyzeStats() error {
+	_, err := p.conn.Exec("ANALYZE")
+	return err
+}
+
 func intSliceToInt64(arr []int) []int64 {
 	if len(arr) == 0 {
 		return nil
@@ -311,7 +388,7 @@ func (p *ProjectDB) LookupEmbeddingCache(hashes []string) (map[string][]float32,
 	}
 
 	result := make(map[string][]float32, len(hashes))
-	const batchSize = 500
+	const batchSize = 2000
 
 	for i := 0; i < len(hashes); i += batchSize {
 		end := i + batchSize
@@ -383,7 +460,7 @@ func parseVector(iface interface{}) []float32 {
 }
 
 // StoreEmbeddingCache bulk-inserts embedding cache entries, skipping duplicates.
-// Uses INSERT OR IGNORE to handle duplicate content hashes gracefully.
+// Uses DuckDB's Appender API for bulk performance, mirroring AppendChunksAndEmbeddings.
 func (p *ProjectDB) StoreEmbeddingCache(entries []CacheEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -399,14 +476,29 @@ func (p *ProjectDB) StoreEmbeddingCache(entries []CacheEntry) error {
 		}
 	}
 
-	for _, e := range unique {
-		_, err := p.conn.Exec(
-			`INSERT OR IGNORE INTO embedding_cache (content_hash, vector, created_at) VALUES ($1, $2, $3)`,
-			e.ContentHash, e.Vector, time.Now(),
-		)
-		if err != nil {
-			return fmt.Errorf("insert embedding cache: %w", err)
-		}
+	sqlConn, err := p.conn.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("get conn for embedding cache: %w", err)
 	}
-	return nil
+	defer sqlConn.Close()
+
+	return sqlConn.Raw(func(driverConn interface{}) error {
+		dc := driverConn.(driver.Conn)
+		app, err := duckdb.NewAppenderFromConn(dc, "", "embedding_cache")
+		if err != nil {
+			return fmt.Errorf("new appender for embedding cache: %w", err)
+		}
+		now := time.Now()
+		for _, e := range unique {
+			if err := app.AppendRow(e.ContentHash, e.Vector, now); err != nil {
+				app.Close()
+				return fmt.Errorf("append embedding cache row: %w", err)
+			}
+		}
+		if err := app.Flush(); err != nil {
+			app.Close()
+			return fmt.Errorf("flush embedding cache: %w", err)
+		}
+		return app.Close()
+	})
 }

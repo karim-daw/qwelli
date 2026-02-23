@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 )
@@ -19,7 +20,11 @@ func OpenProjectDB(path string, dimension int) (*ProjectDB, error) {
 		return nil, errors.New("path is required")
 	}
 
-	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_write", path))
+	threads := runtime.NumCPU()
+	if threads > 4 {
+		threads = 4
+	}
+	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_write&threads=%d", path, threads))
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +91,7 @@ func (p *ProjectDB) CountEmbeddings() (int, error) {
 }
 
 func GetDimensionFromDB(dbPath string) (int, error) {
-	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_only", dbPath))
+	conn, err := sql.Open("duckdb", fmt.Sprintf("%s?access_mode=read_only&threads=1", dbPath))
 	if err != nil {
 		return 0, err
 	}
@@ -100,4 +105,27 @@ func GetDimensionFromDB(dbPath string) (int, error) {
 	var dim int
 	fmt.Sscanf(dimStr, "%d", &dim)
 	return dim, nil
+}
+
+// IndexMeta holds the minimal metadata needed to list indexes without opening a full ProjectDB.
+type IndexMeta struct {
+	FolderPath string
+	ChunkCount int
+}
+
+// ReadIndexMeta opens a DuckDB file read-only (no VSS, no schema DDL) and reads
+// only the folder_path metadata key and the chunk count. It is intended for the
+// ListIndexes hot path where opening a full ProjectDB is too expensive.
+func ReadIndexMeta(dbPath string) (IndexMeta, error) {
+	conn, err := sql.Open("duckdb", dbPath+"?access_mode=read_only&threads=1")
+	if err != nil {
+		return IndexMeta{}, err
+	}
+	defer conn.Close()
+
+	var meta IndexMeta
+	conn.QueryRow(`
+		SELECT (SELECT value FROM metadata WHERE key = 'folder_path'), COUNT(*) FROM chunks
+	`).Scan(&meta.FolderPath, &meta.ChunkCount)
+	return meta, nil
 }

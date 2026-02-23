@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
@@ -79,7 +81,13 @@ func (s *Service) indexFolder(ctx context.Context, folderPath string, incrementa
 	if len(phaseCb) > 0 {
 		phase = phaseCb[0]
 	}
-	return s.engine.IndexFolder(ctx, projectDB, absPath, incremental, progressCb, phase)
+	if err := s.engine.IndexFolder(ctx, projectDB, absPath, incremental, progressCb, phase); err != nil {
+		return err
+	}
+	// Refresh column statistics so the query planner makes optimal choices
+	// on subsequent searches. Runs in <1s on typical indexes.
+	_ = projectDB.AnalyzeStats()
+	return nil
 }
 
 // handleModelChange checks if the embedding model changed and recreates the DB if needed.
@@ -90,7 +98,7 @@ func (s *Service) handleModelChange(dbPath string, dimension int) {
 			stored, _ := tmpDB.GetMetadata("model")
 			tmpDB.Close()
 			if stored != "" && stored != currentModel {
-				fmt.Printf("⚠️  Model changed from '%s' to '%s' — recreating database...\n", stored, currentModel)
+				log.Printf("⚠️  Model changed from '%s' to '%s' — recreating database...", stored, currentModel)
 				os.Remove(dbPath)
 			}
 		}
@@ -164,36 +172,43 @@ func (s *Service) ListIndexes() ([]IndexInfo, error) {
 		return nil, fmt.Errorf("list indexes: %w", err)
 	}
 
-	indexes := make([]IndexInfo, 0, len(files))
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		indexes = make([]IndexInfo, 0, len(files))
+	)
+
 	for _, dbFile := range files {
-		dim, err := db.GetDimensionFromDB(dbFile)
-		if err != nil {
-			continue
-		}
-		pdb, err := db.OpenProjectDB(dbFile, dim)
-		if err != nil {
-			continue
-		}
+		wg.Add(1)
+		go func(dbFile string) {
+			defer wg.Done()
 
-		count, _ := pdb.CountChunks()
-		folder, _ := pdb.GetMetadata("folder_path")
-		pdb.Close()
+			meta, err := db.ReadIndexMeta(dbFile)
+			if err != nil {
+				return
+			}
 
-		if folder == "" {
-			folder = strings.TrimSuffix(filepath.Base(dbFile), ".db")
-		}
+			folder := meta.FolderPath
+			if folder == "" {
+				folder = strings.TrimSuffix(filepath.Base(dbFile), ".db")
+			}
 
-		var size int64
-		var modTime time.Time
-		if info, err := os.Stat(dbFile); err == nil {
-			size = info.Size()
-			modTime = info.ModTime()
-		}
+			var size int64
+			var modTime time.Time
+			if info, err := os.Stat(dbFile); err == nil {
+				size = info.Size()
+				modTime = info.ModTime()
+			}
 
-		indexes = append(indexes, IndexInfo{
-			FolderPath: folder, DBPath: dbFile,
-			DocumentCount: count, SizeBytes: size, LastModified: modTime,
-		})
+			mu.Lock()
+			indexes = append(indexes, IndexInfo{
+				FolderPath: folder, DBPath: dbFile,
+				DocumentCount: meta.ChunkCount, SizeBytes: size, LastModified: modTime,
+			})
+			mu.Unlock()
+		}(dbFile)
 	}
+
+	wg.Wait()
 	return indexes, nil
 }
