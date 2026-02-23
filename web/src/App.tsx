@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppProvider, useAppContext } from "@/contexts/AppContext";
+import { AppProvider } from "@/contexts/AppContext";
+import { AppMetaProvider, useAppMetaContext } from "@/contexts/AppMetaContext";
 import { SearchProvider } from "@/contexts/SearchContext";
 import { SetupScreen } from "@/components/screens/SetupScreen";
 import { QuitScreen } from "@/components/screens/QuitScreen";
@@ -10,7 +11,7 @@ import { useTheme } from "@/hooks/useTheme";
 import * as setupApi from "@/api/setup";
 
 function AppContent() {
-    const { needsSetup, setNeedsSetup, quitConfirmed } = useAppContext();
+    const { needsSetup, setNeedsSetup, quitConfirmed } = useAppMetaContext();
     useTheme();
 
     useEffect(() => {
@@ -34,10 +35,12 @@ function AppContent() {
 export default function App() {
     return (
         <TooltipProvider>
-            <AppProvider>
-                <AppContent />
-                <Toaster />
-            </AppProvider>
+            <AppMetaProvider>
+                <AppProvider>
+                    <AppContent />
+                    <Toaster />
+                </AppProvider>
+            </AppMetaProvider>
         </TooltipProvider>
     );
 }

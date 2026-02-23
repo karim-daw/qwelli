@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAppContext } from "@/contexts/AppContext";
+import { useAppMetaContext } from "@/contexts/AppMetaContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import * as setupApi from "@/api/setup";
 import * as serverApi from "@/api/server";
 
 export function SetupScreen() {
-    const { setQuitConfirmed } = useAppContext();
+    const { setQuitConfirmed } = useAppMetaContext();
     const [apiKey, setApiKey] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");

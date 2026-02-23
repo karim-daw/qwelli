@@ -6,7 +6,7 @@ import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { NewIndexDialog } from "@/components/modals/NewIndexDialog";
 import { IndexProgressModal } from "@/components/modals/IndexProgressModal";
 import { SettingsDialog } from "@/components/modals/SettingsDialog";
-import { useAppContext } from "@/contexts/AppContext";
+import { useAppMetaContext } from "@/contexts/AppMetaContext";
 import { useIndexes } from "@/hooks/useIndexes";
 import { useTerminal } from "@/hooks/useTerminal";
 import { useResizable } from "@/hooks/useResizable";
@@ -16,7 +16,7 @@ import * as indexesApi from "@/api/indexes";
 import { toast } from "sonner";
 
 export function AppLayout() {
-    const { setQuitConfirmed } = useAppContext();
+    const { setQuitConfirmed } = useAppMetaContext();
     const { fetchIndexes } = useIndexes();
     const terminal = useTerminal();
     const indexProgress = useIndexProgress();
