@@ -29,14 +29,14 @@ export function IndexProgressModal({
 }: IndexProgressModalProps) {
     return (
         <Dialog open onOpenChange={() => isComplete && onClose()}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden" onInteractOutside={(e) => e.preventDefault()}>
                 <DialogHeader>
                     <DialogTitle>
                         {isComplete
                             ? "Indexing Complete!"
                             : "Indexing in progress"}
                     </DialogTitle>
-                    <DialogDescription className="font-mono truncate">
+                    <DialogDescription className="font-mono truncate min-w-0">
                         {progress.indexPath}
                     </DialogDescription>
                 </DialogHeader>

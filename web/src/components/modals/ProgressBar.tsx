@@ -39,9 +39,9 @@ export function ProgressBar({ progress, phase }: ProgressBarProps) {
             </div>
 
             {showFile && progress.file && (
-                <div className="bg-muted rounded-lg p-4 border mb-6">
-                    <div className="flex items-start gap-3">
-                        <div className="mt-1">
+                <div className="bg-muted rounded-lg p-4 border mb-6 min-w-0 overflow-hidden">
+                    <div className="flex items-start gap-3 min-w-0">
+                        <div className="mt-1 shrink-0">
                             <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
                         </div>
                         <div className="flex-1 min-w-0">
