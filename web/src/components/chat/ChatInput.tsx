@@ -47,7 +47,7 @@ export function ChatInput({
 
     return (
         <div className="flex flex-col gap-2">
-            <div className="relative flex items-end border border-border rounded-xl bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring">
+            <div className="relative flex items-end border border-border rounded-xl bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring/50">
                 <textarea
                     ref={textareaRef}
                     value={value}

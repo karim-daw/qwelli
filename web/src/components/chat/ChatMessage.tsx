@@ -5,11 +5,11 @@ import { ToolCallBlock } from "./ToolCallBlock";
 
 function ThinkingIndicator() {
     return (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="inline-flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+        <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
+            <span className="inline-flex flex-col gap-1">
+                <span className="w-4 h-1 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:0ms]" />
+                <span className="w-4 h-1 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:150ms]" />
+                <span className="w-4 h-1 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:300ms]" />
             </span>
             <span>Thinking...</span>
         </div>
@@ -45,7 +45,7 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
         message.isStreaming && !hasContent && !hasToolCalls;
 
     return (
-        <div className="flex flex-col gap-2 px-1">
+        <div className="flex flex-col gap-1.5 px-1">
             {showThinking && <ThinkingIndicator />}
             {hasToolCalls &&
                 message.toolCalls!.map((tc, i) => (
