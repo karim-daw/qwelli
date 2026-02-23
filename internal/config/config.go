@@ -37,7 +37,7 @@ type Config struct {
 	// Agent / Azure AI Foundry settings (Claude via Foundry)
 	FoundryEndpoint string `yaml:"foundry_endpoint"` // e.g. https://resource.services.ai.azure.com/anthropic
 	FoundryAPIKey   string `yaml:"foundry_api_key"`
-	FoundryModel    string `yaml:"foundry_model"` // default: claude-sonnet-4-20250514
+	FoundryModel    string `yaml:"foundry_model"` // default: claude-sonnet-4-6
 
 	// Local storage settings
 	IndexDir string `yaml:"index_dir"` // Where to store .db files
@@ -63,7 +63,7 @@ func DefaultConfig() *Config {
 		EnableParallelPDF:       true, // Parallel PDF page processing enabled by default
 		ParallelPDFWorkers:      0,    // 0 = auto-detect (~90% of CPU cores)
 		MaxConcurrentEmbeddings: 5,    // Max parallel embedding API calls
-		FoundryModel:           "claude-sonnet-4-20250514",
+		FoundryModel:           "claude-sonnet-4-6",
 		IndexDir:               filepath.Join(homeDir, ".qwelli", "indexes"),
 	}
 }
