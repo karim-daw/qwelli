@@ -110,18 +110,25 @@ func (p *PDFProcessor) ExtractText(filePath string) ([]PDFPage, *PDFMetadata, er
 	return pages, metadata, nil
 }
 
-// extractPageText extracts and cleans text from a single page
-func (p *PDFProcessor) extractPageText(page pdf.Page) (string, error) {
+// extractPageText extracts and cleans text from a single page.
+// Uses recover() to catch panics from the PDF library when processing
+// malformed pages (e.g. corrupted arrays, invalid object references).
+func (p *PDFProcessor) extractPageText(page pdf.Page) (text string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			text = ""
+			err = fmt.Errorf("panic during page text extraction: %v", r)
+		}
+	}()
+
 	// Get plain text from the page
-	text, err := page.GetPlainText(nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract text: %w", err)
+	rawText, extractErr := page.GetPlainText(nil)
+	if extractErr != nil {
+		return "", fmt.Errorf("failed to extract text: %w", extractErr)
 	}
 
 	// Clean and normalize the text
-	text = p.cleanText(text)
-
-	return text, nil
+	return p.cleanText(rawText), nil
 }
 
 // cleanText normalizes and cleans extracted text

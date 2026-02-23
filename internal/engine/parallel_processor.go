@@ -138,7 +138,15 @@ const maxSingleReadSize = 50 * 1024 * 1024 // 50MB - above this use streaming ha
 // processOneFile handles the CPU-bound work for a single file:
 // path resolution, stat, hashing, and content processing.
 // Reads each file once from disk when under maxSingleReadSize to avoid redundant I/O.
-func (e *Engine) processOneFile(f string) fileProcessResult {
+// Uses named return with recover() to catch panics from third-party libraries
+// (e.g. malformed PDFs causing unbounded allocations in the PDF parser).
+func (e *Engine) processOneFile(f string) (result fileProcessResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("⚠️  panic processing %s: %v", filepath.Base(f), r)
+			result = fileProcessResult{skipped: true}
+		}
+	}()
 	absPath, err := filepath.Abs(f)
 	if err != nil {
 		return fileProcessResult{skipped: true}
