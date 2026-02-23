@@ -30,7 +30,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Use Voyage AI as the provider
 	cfg.EmbeddingProvider = "voyage"
-	defaultModel := "voyage-multimodal-3"
+	defaultModel := "voyage-multimodal-3.5"
 	defaultEndpoint := "https://api.voyageai.com/v1/multimodalembeddings"
 	cfg.EnableMultimodal = true
 
@@ -79,6 +79,29 @@ func runInit(cmd *cobra.Command, args []string) error {
 	rerankInput = strings.TrimSpace(strings.ToLower(rerankInput))
 	if rerankInput == "n" || rerankInput == "no" {
 		cfg.EnableReranker = false
+	}
+
+	// Optional: AI Chat (Azure AI Foundry) settings
+	fmt.Println("\n--- AI Chat (optional, for 'qwelli chat') ---")
+	fmt.Print("Enter Foundry endpoint (press Enter to skip): ")
+	foundryEndpoint, _ := reader.ReadString('\n')
+	foundryEndpoint = strings.TrimSpace(foundryEndpoint)
+	if foundryEndpoint != "" {
+		cfg.FoundryEndpoint = foundryEndpoint
+
+		fmt.Print("Enter Foundry API key: ")
+		foundryKey, _ := reader.ReadString('\n')
+		foundryKey = strings.TrimSpace(foundryKey)
+		if foundryKey != "" {
+			cfg.FoundryAPIKey = foundryKey
+		}
+
+		fmt.Printf("Enter Foundry model [%s]: ", cfg.FoundryModel)
+		foundryModel, _ := reader.ReadString('\n')
+		foundryModel = strings.TrimSpace(foundryModel)
+		if foundryModel != "" {
+			cfg.FoundryModel = foundryModel
+		}
 	}
 
 	// Save configuration

@@ -23,10 +23,20 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		masked = "****"
 	}
 
+	foundryMasked := ""
+	if len(cfg.FoundryAPIKey) > 4 {
+		foundryMasked = "****" + cfg.FoundryAPIKey[len(cfg.FoundryAPIKey)-4:]
+	} else if cfg.FoundryAPIKey != "" {
+		foundryMasked = "****"
+	}
+
 	jsonOK(w, ConfigResponse{
-		APIKeyMasked: masked,
-		Model:        cfg.Model,
-		Endpoint:     cfg.Endpoint,
+		APIKeyMasked:     masked,
+		Model:            cfg.Model,
+		Endpoint:         cfg.Endpoint,
+		FoundryEndpoint:  cfg.FoundryEndpoint,
+		FoundryKeyMasked: foundryMasked,
+		FoundryModel:     cfg.FoundryModel,
 	})
 }
 
@@ -51,9 +61,12 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	update := service.ConfigUpdate{
-		APIKey:   req.APIKey,
-		Model:    req.Model,
-		Endpoint: req.Endpoint,
+		APIKey:          req.APIKey,
+		Model:           req.Model,
+		Endpoint:        req.Endpoint,
+		FoundryEndpoint: req.FoundryEndpoint,
+		FoundryAPIKey:   req.FoundryAPIKey,
+		FoundryModel:    req.FoundryModel,
 	}
 
 	warnings, err := s.service.UpdateConfig(update)
@@ -72,6 +85,15 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Endpoint != nil {
 		parts = append(parts, fmt.Sprintf("endpoint=%s", *req.Endpoint))
+	}
+	if req.FoundryEndpoint != nil {
+		parts = append(parts, fmt.Sprintf("foundry_endpoint=%s", *req.FoundryEndpoint))
+	}
+	if req.FoundryAPIKey != nil {
+		parts = append(parts, "Foundry API key")
+	}
+	if req.FoundryModel != nil {
+		parts = append(parts, fmt.Sprintf("foundry_model=%s", *req.FoundryModel))
 	}
 	if len(parts) > 0 {
 		BroadcastTerminalOutput(fmt.Sprintf(

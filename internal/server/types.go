@@ -44,6 +44,11 @@ type ConfigResponse struct {
 	APIKeyMasked string `json:"apiKeyMasked"`
 	Model        string `json:"model"`
 	Endpoint     string `json:"endpoint"`
+
+	// Foundry (AI Chat) settings
+	FoundryEndpoint  string `json:"foundryEndpoint"`
+	FoundryKeyMasked string `json:"foundryKeyMasked"`
+	FoundryModel     string `json:"foundryModel"`
 }
 
 // UpdateConfigRequest is the POST body for /api/config/update.
@@ -52,6 +57,11 @@ type UpdateConfigRequest struct {
 	APIKey   *string `json:"apiKey"`
 	Model    *string `json:"model"`
 	Endpoint *string `json:"endpoint"`
+
+	// Foundry (AI Chat) settings
+	FoundryEndpoint *string `json:"foundryEndpoint"`
+	FoundryAPIKey   *string `json:"foundryApiKey"`
+	FoundryModel    *string `json:"foundryModel"`
 }
 
 // UpdateConfigResponse is returned by POST /api/config/update.

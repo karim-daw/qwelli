@@ -81,6 +81,11 @@ type ConfigUpdate struct {
 	APIKey   *string
 	Model    *string
 	Endpoint *string
+
+	// Foundry (AI Chat) settings
+	FoundryEndpoint *string
+	FoundryAPIKey   *string
+	FoundryModel    *string
 }
 
 // UpdateConfig applies non-nil fields to the config, saves to disk,
@@ -107,6 +112,20 @@ func (s *Service) UpdateConfig(update ConfigUpdate) ([]string, error) {
 
 	if update.Endpoint != nil && *update.Endpoint != cfg.Endpoint {
 		cfg.Endpoint = *update.Endpoint
+		changed = true
+	}
+
+	// Foundry settings (no client rebuild needed — used only by `qwelli chat`)
+	if update.FoundryEndpoint != nil && *update.FoundryEndpoint != cfg.FoundryEndpoint {
+		cfg.FoundryEndpoint = *update.FoundryEndpoint
+		changed = true
+	}
+	if update.FoundryAPIKey != nil && *update.FoundryAPIKey != cfg.FoundryAPIKey {
+		cfg.FoundryAPIKey = *update.FoundryAPIKey
+		changed = true
+	}
+	if update.FoundryModel != nil && *update.FoundryModel != cfg.FoundryModel {
+		cfg.FoundryModel = *update.FoundryModel
 		changed = true
 	}
 
