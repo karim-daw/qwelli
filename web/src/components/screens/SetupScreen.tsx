@@ -20,7 +20,7 @@ export function SetupScreen() {
         try {
             await setupApi.saveSetup({
                 apiKey: apiKey.trim(),
-                model: "voyage-multimodal-3",
+                model: "voyage-multimodal-3.5",
                 endpoint: "https://api.voyageai.com/v1/multimodalembeddings",
                 enableMultimodal: true,
                 enableReranker: true,

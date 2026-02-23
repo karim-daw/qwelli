@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Qwelli is a local semantic file search engine. It indexes folders using Voyage AI embeddings (default model: `voyage-multimodal-3`) and stores them in DuckDB with HNSW vector search. It ships as a single binary with an embedded React web UI. It also includes a standalone AI agent (`qwelli chat`) that lets users ask natural-language questions about their indexed document collections using Claude on Azure AI Foundry.
+Qwelli is a local semantic file search engine. It indexes folders using Voyage AI embeddings (default model: `voyage-multimodal-3.5`) and stores them in DuckDB with HNSW vector search. It ships as a single binary with an embedded React web UI. It also includes a standalone AI agent (`qwelli chat`) that lets users ask natural-language questions about their indexed document collections using Claude on Azure AI Foundry.
 
 ## Build & Test Commands
 
@@ -130,7 +130,7 @@ User ↔ CLI (chat.go) ↔ Agent Loop (internal/agent/) ↔ Azure AI Foundry
 
 ```bash
 VOYAGE_API_KEY=...              # Required for indexing/search
-VOYAGE_MODEL=voyage-multimodal-3  # Embedding model (default)
+VOYAGE_MODEL=voyage-multimodal-3.5  # Embedding model (default)
 VOYAGE_EMBEDDING_ENDPOINT=...  # API endpoint
 VOYAGE_RERANK_MODEL=...        # Optional reranker
 VOYAGE_RERANK_ENDPOINT=...     # Optional reranker endpoint

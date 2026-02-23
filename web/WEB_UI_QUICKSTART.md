@@ -14,7 +14,7 @@ Create a `.env` file in the project root:
 
 ```bash
 QWELLI_EMBEDDING_KEY=your-voyage-api-key
-QWELLI_EMBEDDING_MODEL=voyage-multimodal-3
+QWELLI_EMBEDDING_MODEL=voyage-multimodal-3.5
 QWELLI_EMBEDDING_ENDPOINT=https://api.voyageai.com/v1/multimodalembeddings
 ```
 

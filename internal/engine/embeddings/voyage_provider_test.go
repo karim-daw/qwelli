@@ -116,7 +116,7 @@ func TestEmbedder_Embed(t *testing.T) {
 			}{
 				{Object: "embedding", Embedding: emb, Index: 0},
 			},
-			Model: "voyage-multimodal-3",
+			Model: "voyage-multimodal-3.5",
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -126,7 +126,7 @@ func TestEmbedder_Embed(t *testing.T) {
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "test-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: server.URL,
 	})
 	if err != nil {
@@ -174,7 +174,7 @@ func TestEmbedder_EmbedBatch(t *testing.T) {
 		response := testEmbeddingResponse{
 			Object: "list",
 			Data:   dataItems,
-			Model:  "voyage-multimodal-3",
+			Model:  "voyage-multimodal-3.5",
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -184,7 +184,7 @@ func TestEmbedder_EmbedBatch(t *testing.T) {
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "test-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: server.URL,
 	})
 	if err != nil {
@@ -223,7 +223,7 @@ func TestEmbedder_ErrorHandling(t *testing.T) {
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "invalid-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: server.URL,
 	})
 	if err != nil {

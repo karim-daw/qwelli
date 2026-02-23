@@ -44,7 +44,7 @@ func TestEmbedder_IsMultimodal(t *testing.T) {
 			}{
 				{Object: "embedding", Embedding: emb, Index: 0},
 			},
-			Model: "voyage-multimodal-3",
+			Model: "voyage-multimodal-3.5",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -53,7 +53,7 @@ func TestEmbedder_IsMultimodal(t *testing.T) {
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "test-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: server.URL,
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestEmbedder_IsMultimodal(t *testing.T) {
 func TestEmbedder_EmptyInputs(t *testing.T) {
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "test-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: "https://api.voyageai.com/v1/multimodalembeddings",
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestEmbedder_Batching(t *testing.T) {
 		response := testMultimodalResponse{
 			Object: "list",
 			Data:   dataItems,
-			Model:  "voyage-multimodal-3",
+			Model:  "voyage-multimodal-3.5",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -139,7 +139,7 @@ func TestEmbedder_Batching(t *testing.T) {
 
 	client, err := voyage.NewClient(voyage.ClientConfig{
 		APIKey:            "test-key",
-		EmbeddingModel:    "voyage-multimodal-3",
+		EmbeddingModel:    "voyage-multimodal-3.5",
 		EmbeddingEndpoint: server.URL,
 	})
 	if err != nil {

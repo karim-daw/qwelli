@@ -159,7 +159,7 @@ Environment variables override config file values:
 | Variable | Description |
 |----------|-------------|
 | `VOYAGE_API_KEY` | Voyage AI API key (required) |
-| `VOYAGE_MODEL` | Embedding model (default: `voyage-multimodal-3`) |
+| `VOYAGE_MODEL` | Embedding model (default: `voyage-multimodal-3.5`) |
 | `VOYAGE_EMBEDDING_ENDPOINT` | API endpoint |
 | `VOYAGE_RERANK_MODEL` | Reranker model |
 | `VOYAGE_RERANK_ENDPOINT` | Reranker endpoint |
@@ -181,7 +181,7 @@ Each indexed folder gets its own DuckDB database with HNSW vector index.
 
 | Model | Dimension | Notes |
 |-------|-----------|-------|
-| `voyage-multimodal-3` | 1024 | Text + images (default) |
+| `voyage-multimodal-3.5` | 1024 | Text + images (default) |
 | `voyage-3` | 1024 | Text-only |
 
 ## Project Structure
@@ -233,7 +233,7 @@ go test ./... -cover
 
 ## Cost
 
-Using Voyage AI `voyage-multimodal-3`:
+Using Voyage AI `voyage-multimodal-3.5`:
 
 - ~$0.02 per 1,000 documents indexed
 - ~$0.0001 per search query

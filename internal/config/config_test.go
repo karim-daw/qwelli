@@ -145,7 +145,7 @@ func TestSave_ValidYAML(t *testing.T) {
 	originalCfg := &Config{
 		EmbeddingProvider: "voyage",
 		APIKey:            "test-key-abc",
-		Model:             "voyage-multimodal-3",
+		Model:             "voyage-multimodal-3.5",
 		Endpoint:          "http://api.test.com",
 		EnableMultimodal:  true,
 		ImageQuality:      "high",

@@ -18,7 +18,7 @@ const (
 	DefaultRerankEndpoint    = "https://api.voyageai.com/v1/rerank"
 
 	// Default models
-	DefaultEmbeddingModel = "voyage-multimodal-3"
+	DefaultEmbeddingModel = "voyage-multimodal-3.5"
 	DefaultRerankModel    = "rerank-2"
 
 	// Default timeouts
