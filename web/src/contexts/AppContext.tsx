@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { Index } from "@/types/index";
 
-type ViewMode = "search" | "status";
+type ViewMode = "search" | "status" | "chat";
 
 interface AppContextValue {
     indexes: Index[];

@@ -3,6 +3,7 @@ import { Folder, Search } from "lucide-react";
 import { SearchResults } from "@/components/search/SearchResults";
 import { RecentSearches } from "@/components/search/RecentSearches";
 import { StatusView } from "@/components/status/StatusView";
+import { ChatView } from "@/components/chat/ChatView";
 import { FullTextModal } from "@/components/modals/FullTextModal";
 import { PDFPreviewModal } from "@/components/modals/PDFPreviewModal";
 import { useAppContext } from "@/contexts/AppContext";
@@ -34,6 +35,10 @@ export function MainContent() {
                 </div>
             </div>
         );
+    }
+
+    if (viewMode === "chat") {
+        return <ChatView />;
     }
 
     return (

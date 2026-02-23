@@ -1,4 +1,4 @@
-import { Menu, ChevronRight, Sun, Moon, Power, Terminal as TerminalIcon, Settings } from "lucide-react";
+import { Menu, ChevronRight, Sun, Moon, Power, Terminal as TerminalIcon, Settings, Search, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchForm } from "@/components/search/SearchForm";
@@ -20,7 +20,7 @@ export function TopBar({
     onOpenSettings,
     onQuit,
 }: TopBarProps) {
-    const { indexes, selectedIndex, viewMode } = useAppContext();
+    const { indexes, selectedIndex, viewMode, setViewMode } = useAppContext();
     const { isDark, toggleTheme } = useTheme();
 
     const currentIndex = indexes.find((i) => i.path === selectedIndex);
@@ -46,6 +46,36 @@ export function TopBar({
                         )}
                     </div>
                     <div className="flex items-center gap-2">
+                        {selectedIndex && (
+                            <div className="flex items-center rounded-lg border border-border p-0.5 mr-1">
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className={`h-8 w-8 rounded-md ${viewMode === "search" ? "bg-accent" : ""}`}
+                                            onClick={() => setViewMode("search")}
+                                        >
+                                            <Search className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Search</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className={`h-8 w-8 rounded-md ${viewMode === "chat" ? "bg-accent" : ""}`}
+                                            onClick={() => setViewMode("chat")}
+                                        >
+                                            <MessageSquare className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Chat</TooltipContent>
+                                </Tooltip>
+                            </div>
+                        )}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
