@@ -31,26 +31,30 @@ export async function sendMessage(
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
 
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-            const json = trimmed.slice(6);
-            if (!json) continue;
-            try {
-                const event: ChatEvent = JSON.parse(json);
-                onEvent(event);
-            } catch {
-                // ignore malformed events
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith("data: ")) continue;
+                const json = trimmed.slice(6);
+                if (!json) continue;
+                try {
+                    const event: ChatEvent = JSON.parse(json);
+                    onEvent(event);
+                } catch {
+                    // ignore malformed events
+                }
             }
         }
+    } finally {
+        reader.releaseLock();
     }
 }
 

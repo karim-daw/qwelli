@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { IndexProgress, SSEMessage } from "@/types/progress";
 import * as indexesApi from "@/api/indexes";
 import { toast } from "sonner";
@@ -94,6 +94,13 @@ export function useIndexProgress() {
         },
         [],
     );
+
+    // Close EventSource if component unmounts while streaming
+    useEffect(() => {
+        return () => {
+            eventSourceRef.current?.close();
+        };
+    }, []);
 
     const cancel = useCallback(async () => {
         if (!progress || cancelling) return;

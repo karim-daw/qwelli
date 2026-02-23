@@ -26,25 +26,27 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const api = {
-    async get<T>(url: string): Promise<T> {
-        const response = await fetch(url);
+    async get<T>(url: string, signal?: AbortSignal): Promise<T> {
+        const response = await fetch(url, { signal });
         return handleResponse<T>(response);
     },
 
-    async post<T>(url: string, body?: unknown): Promise<T> {
+    async post<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
         const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: body ? JSON.stringify(body) : undefined,
+            signal,
         });
         return handleResponse<T>(response);
     },
 
-    async rawPost(url: string, body?: unknown): Promise<Response> {
+    async rawPost(url: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
         return fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: body ? JSON.stringify(body) : undefined,
+            signal,
         });
     },
 

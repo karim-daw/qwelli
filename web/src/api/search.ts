@@ -6,7 +6,10 @@ interface SearchResponse {
     cacheStatus: string | null;
 }
 
-export async function search(params: SearchParams): Promise<SearchResponse> {
+export async function search(
+    params: SearchParams,
+    signal?: AbortSignal,
+): Promise<SearchResponse> {
     const urlParams = new URLSearchParams({
         q: params.query,
         index: params.index,
@@ -18,7 +21,9 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
         urlParams.append("content_type", params.contentFilter);
     }
 
-    const response = await fetch("/api/search?" + urlParams.toString());
+    const response = await fetch("/api/search?" + urlParams.toString(), {
+        signal,
+    });
     const data = await response.json();
     const cacheStatus = response.headers.get("X-Cache-Status");
 
