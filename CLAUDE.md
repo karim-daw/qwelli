@@ -51,6 +51,7 @@ CLI/Server → Service → Engine → DB
 - **Service layer** (`internal/service/`) owns DB lifecycle. CLI and server code never open databases directly — they call `service.Load()` or `service.New()`.
 - **Engine** (`internal/engine/engine.go`) receives `*db.ProjectDB` from callers. It coordinates file processing, embedding, and search but doesn't manage connections.
 - **DB layer** (`internal/db/`) wraps DuckDB with vector search. Schema is in `schema.go`. Chunks table denormalizes `file_path` and `file_type` from files table for JOIN-free search queries. `ReadIndexMeta()` is a lightweight read-only path (no VSS, no schema DDL) used by `ListIndexes()` to read only `folder_path` and chunk count — do not replace it with `OpenProjectDB()` calls in listing code. `FindFiles(FindFilesFilter)` pushes type/name/date/subfolder predicates into SQL — use it instead of `GetAllFiles()` + Go-side filtering. `AnalyzeStats()` runs `ANALYZE` after bulk inserts to refresh query-planner statistics. HNSW indexes are built with M=12, ef_construction=64 for better recall than DuckDB defaults.
+- **DuckDB concurrency** — DuckDB only allows one open connection to a `.db` file at a time. The `Service` holds a per-dbPath `sync.Mutex` (via `lockDB(dbPath) func()`). Any method that opens a DB must acquire this lock and release it after `Close()`. Use `service.OpenDBLocked(folderPath)` (returns `*ProjectDB, release func(), error`) in tool functions instead of `service.OpenDB()`. `SearchByDBPath`, `GetIndexStatus`, and `GetIndexStats` already acquire the lock internally — do not add a second lock around calls to those methods.
 
 ### Key Interfaces
 
@@ -100,6 +101,7 @@ web/src/
 - **Log broadcasting** (`log_broadcast.go`): `BroadcastWriter` is set as `log.SetOutput` in `Server.Start()`. Every `log.Printf` anywhere in the codebase — engine, pipeline, voyage, differ, etc. — automatically appears in the terminal panel. Do not call `BroadcastTerminalOutput` directly for regular log messages; use `log.Printf` instead. `BroadcastTerminalOutput` is reserved for structured progress/phase events from `progressCb`/`phaseCb`.
 - SSE (Server-Sent Events) for real-time indexing progress (`/api/index/progress`) and terminal output (`/api/terminal/stream`).
 - Search results cached in-memory with 5-minute TTL.
+- **`GetIndexStatus` cached** with 60-second TTL per index path (`Service.statusCache`). Cache is busted after `indexFolder()` completes. This prevents expensive repeated filesystem scans when the status view and agent `status` tool both fire in quick succession.
 - Background indexing with cancellation support via context.
 - Setup server (`setup_server.go`) runs on first launch when no config exists, then restarts as the main server.
 
@@ -108,6 +110,8 @@ web/src/
 `resolving` → `processing` → `embedding` → `storing` → `hnsw` → `complete`
 
 Files are scanned, text/images extracted (with parallel workers), embeddings generated via Voyage API in batches, stored in DuckDB, then the HNSW index is rebuilt if embeddings changed.
+
+**Differ / change detection** (`internal/engine/differ/diff_engine.go`): SHA256 hashing is skipped on UNC/network paths (`\\server\share` or `//server/share`) — hashing a file over SMB requires downloading the full content, which is extremely slow. On network paths, any file where size or mtime differs is treated as updated without hash verification. On local paths, SHA256 is used to detect touch-without-change. `DetectChanges` sorts `ToAdd`/`ToUpdate`/`ToDelete` before returning for deterministic UI ordering.
 
 ### Agent Architecture
 
@@ -119,7 +123,7 @@ User ↔ CLI (chat.go) ↔ Agent Loop (internal/agent/) ↔ Azure AI Foundry
                       Service  Filesystem  DB
 ```
 
-- **Agent loop** (`internal/agent/agent.go`) — streaming tool-use loop using `anthropic-sdk-go`. Calls `Messages.NewStreaming()`, accumulates events, dispatches tool calls, sends results back, repeats until text-only response.
+- **Agent loop** (`internal/agent/agent.go`) — streaming tool-use loop using `anthropic-sdk-go`. Calls `Messages.NewStreaming()`, accumulates events, dispatches tool calls in parallel (goroutines + `sync.WaitGroup`), sends results back, repeats until text-only response. Each `tool_call` and `tool_result` `ChatEvent` carries `ToolCallID` (the Anthropic tool_use block ID) so the frontend can match results to the right call regardless of arrival order.
 - **Tools** (`internal/agent/tools.go`) — 8 tools that map to existing service/DB/filesystem operations:
   - `search` — semantic/keyword/hybrid search via `svc.SearchByDBPath()`
   - `status` — index status via `svc.GetIndexStatus()`
@@ -181,6 +185,7 @@ Environment variables override `~/.qwelli/config.yaml` values.
 3. Implement `exec<ToolName>()` function — takes raw JSON input, validates, calls service/DB/filesystem, returns `(string, bool)` (result, isError)
 4. Security: all file/directory tools must validate paths are within the indexed folder
 5. Update system prompt in `internal/agent/agent.go` to guide the agent on when to use the new tool
+6. Use `svc.OpenDBLocked(indexPath)` (not `svc.OpenDB`) for any tool that opens the project DB — this serializes concurrent tool executions to avoid DuckDB "different configuration" errors
 
 ## Testing Notes
 
@@ -205,3 +210,5 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Always use `--admin` flag when merging PRs with `gh pr merge`.
 - Use `log.Printf` for all backend diagnostic output — never `fmt.Printf` and never direct `BroadcastTerminalOutput` calls for plain log messages. `BroadcastWriter` ensures every `log.Printf` reaches both stderr and the in-app terminal automatically.
 - Agent `find_files` tool must delegate to `projectDB.FindFiles(db.FindFilesFilter{...})` — do not call `GetAllFiles()` and filter in Go.
+- Agent tool DB access must use `svc.OpenDBLocked()` not `svc.OpenDB()` — parallel tool execution will otherwise hit DuckDB's single-connection limit and fail with "different configuration" errors.
+- `ChatEvent.ToolCallID` must be set on both `tool_call` and `tool_result` events — the frontend uses it to match results to the correct tool call block when tools run in parallel.
