@@ -23,9 +23,9 @@ export function FileChangeList({
                 {label} ({files.length})
             </h3>
             <div className="space-y-2">
-                {files.slice(0, 10).map((file, i) => (
+                {files.slice(0, 10).map((file) => (
                     <div
-                        key={i}
+                        key={file.path}
                         className="text-xs bg-muted rounded px-3 py-2 border"
                     >
                         <div className="font-mono truncate">{file.path}</div>

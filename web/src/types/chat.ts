@@ -1,12 +1,19 @@
+export interface MessageStep {
+    thinking?: string;
+    text?: string;
+    toolCalls?: ToolCall[];
+}
+
 export interface ChatMessage {
     id: string;
     role: "user" | "assistant";
     content: string;
-    toolCalls?: ToolCall[];
+    steps: MessageStep[]; // one entry per agent loop iteration, in order
     isStreaming?: boolean;
 }
 
 export interface ToolCall {
+    id?: string; // Anthropic tool_use block ID — used to match tool_result to the right tool_call
     name: string;
     input: Record<string, unknown>;
     result?: string;
@@ -24,6 +31,7 @@ export interface ChatEvent {
         | "error";
     text?: string;
     tool_name?: string;
+    tool_call_id?: string; // links tool_result back to its tool_call
     tool_input?: Record<string, unknown>;
     tool_result?: string;
     is_error?: boolean;
