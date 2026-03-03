@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -13,12 +14,13 @@ import (
 
 // ChatEvent represents a streaming event from the agent loop.
 type ChatEvent struct {
-	Type       string          `json:"type"`                  // "thinking", "tool_call", "tool_result", "text_delta", "done", "error"
-	Text       string          `json:"text,omitempty"`        // for text_delta, thinking, error
-	ToolName   string          `json:"tool_name,omitempty"`   // for tool_call, tool_result
-	ToolInput  json.RawMessage `json:"tool_input,omitempty"`  // for tool_call
-	ToolResult string          `json:"tool_result,omitempty"` // for tool_result
-	IsError    bool            `json:"is_error,omitempty"`    // for tool_result
+	Type       string          `json:"type"`                   // "thinking", "tool_call", "tool_result", "text_delta", "done", "error"
+	Text       string          `json:"text,omitempty"`         // for text_delta, thinking, error
+	ToolName   string          `json:"tool_name,omitempty"`    // for tool_call, tool_result
+	ToolCallID string          `json:"tool_call_id,omitempty"` // Anthropic tool_use block ID — links tool_call to its tool_result
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`   // for tool_call
+	ToolResult string          `json:"tool_result,omitempty"`  // for tool_result
+	IsError    bool            `json:"is_error,omitempty"`     // for tool_result
 }
 
 // Agent orchestrates a conversational tool-use loop with Claude via Azure AI Foundry.
@@ -91,14 +93,13 @@ func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(Ch
 	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage)))
 
 	for {
-		emit(ChatEvent{Type: "thinking"})
-
 		stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 			Model:     a.model,
-			MaxTokens: 8192,
+			MaxTokens: 16000,
 			Messages:  a.messages,
 			Tools:     a.tools,
 			System:    a.system,
+			Thinking:  anthropic.ThinkingConfigParamOfEnabled(8000),
 		})
 
 		message := anthropic.Message{}
@@ -111,7 +112,9 @@ func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(Ch
 
 			switch ev := event.AsAny().(type) {
 			case anthropic.ContentBlockDeltaEvent:
-				if ev.Delta.Text != "" {
+				if ev.Delta.Thinking != "" {
+					emit(ChatEvent{Type: "thinking", Text: ev.Delta.Thinking})
+				} else if ev.Delta.Text != "" {
 					emit(ChatEvent{Type: "text_delta", Text: ev.Delta.Text})
 				}
 			}
@@ -124,17 +127,44 @@ func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(Ch
 		// Append the assistant's full response to history
 		a.messages = append(a.messages, message.ToParam())
 
-		// Collect tool calls
-		var toolResults []anthropic.ContentBlockParamUnion
+		// Collect tool calls and emit tool_call events upfront
+		type pendingTool struct {
+			variant  anthropic.ToolUseBlock
+			rawInput json.RawMessage
+		}
+		var pending []pendingTool
 		for _, block := range message.Content {
 			if variant, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
 				rawInput := json.RawMessage(variant.JSON.Input.Raw())
-				emit(ChatEvent{Type: "tool_call", ToolName: variant.Name, ToolInput: rawInput})
-
-				result, isErr := executeTool(ctx, a.svc, a.index, a.dbPath, variant.Name, rawInput)
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(variant.ID, result, isErr))
-				emit(ChatEvent{Type: "tool_result", ToolName: variant.Name, ToolResult: result, IsError: isErr})
+				emit(ChatEvent{Type: "tool_call", ToolName: variant.Name, ToolCallID: variant.ID, ToolInput: rawInput})
+				pending = append(pending, pendingTool{variant: variant, rawInput: rawInput})
 			}
+		}
+
+		// Execute all tools in parallel, preserving order
+		type execResult struct {
+			id     string
+			name   string
+			result string
+			isErr  bool
+		}
+		execResults := make([]execResult, len(pending))
+		var wg sync.WaitGroup
+		for i, p := range pending {
+			wg.Add(1)
+			go func(i int, p pendingTool) {
+				defer wg.Done()
+				result, isErr := executeTool(ctx, a.svc, a.index, a.dbPath, p.variant.Name, p.rawInput)
+				execResults[i] = execResult{id: p.variant.ID, name: p.variant.Name, result: result, isErr: isErr}
+			}(i, p)
+		}
+		wg.Wait()
+
+		// Build tool result blocks and emit tool_result events in order
+		var toolResults []anthropic.ContentBlockParamUnion
+		for _, r := range execResults {
+			toolResults = append(toolResults, anthropic.NewToolResultBlock(r.id, r.result, r.isErr))
+			emit(ChatEvent{Type: "tool_result", ToolName: r.name, ToolCallID: r.id, ToolResult: r.result, IsError: r.isErr})
 		}
 
 		// No tool calls — agent is done

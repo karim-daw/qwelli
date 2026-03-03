@@ -428,10 +428,11 @@ func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.Raw
 		return fmt.Sprintf("access denied: path must be within %s", indexPath), true
 	}
 
-	projectDB, err := svc.OpenDB(indexPath)
+	projectDB, release, err := svc.OpenDBLocked(indexPath)
 	if err != nil {
 		return fmt.Sprintf("failed to open index: %v", err), true
 	}
+	defer release()
 	defer projectDB.Close()
 
 	file, err := projectDB.GetFileByPath(absPath)
@@ -485,10 +486,11 @@ func execGetFileInfo(svc *service.Service, indexPath string, rawInput json.RawMe
 		return fmt.Sprintf("access denied: path must be within %s", indexPath), true
 	}
 
-	projectDB, err := svc.OpenDB(indexPath)
+	projectDB, release, err := svc.OpenDBLocked(indexPath)
 	if err != nil {
 		return fmt.Sprintf("failed to open index: %v", err), true
 	}
+	defer release()
 	defer projectDB.Close()
 
 	file, err := projectDB.GetFileByPath(absPath)
@@ -586,10 +588,11 @@ func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMess
 		Limit:          in.Limit,
 	}
 
-	projectDB, err := svc.OpenDB(indexPath)
+	projectDB, release, err := svc.OpenDBLocked(indexPath)
 	if err != nil {
 		return fmt.Sprintf("failed to open index: %v", err), true
 	}
+	defer release()
 	defer projectDB.Close()
 
 	files, err := projectDB.FindFiles(filter)
