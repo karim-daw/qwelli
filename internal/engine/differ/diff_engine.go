@@ -6,12 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/karim-daw/qwelli/internal/db"
 	"github.com/karim-daw/qwelli/internal/engine/extraction"
 )
+
+// isNetworkPath returns true for UNC paths (\\server\share) which are slow to hash.
+func isNetworkPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, `//`)
+}
 
 // ChangeSet represents files that need to be added, updated, or deleted
 type ChangeSet struct {
@@ -49,6 +56,10 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 	}
 
 	log.Printf("🔍 DetectChanges: Found %d files in database for folder: %s", len(dbFiles), folderPath)
+
+	// On UNC/network paths, SHA256 hashing requires downloading file content over the network
+	// which is extremely slow. Fall back to size+mtime only for network paths.
+	skipHash := isNetworkPath(folderPath)
 
 	// Build map of database files by path
 	dbFileMap := make(map[string]*db.File)
@@ -129,14 +140,22 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 					continue
 				}
 
-				// Size same - check modification time first (optimization)
-				// If mtime is exactly the same, file likely unchanged
+				// Size same - check modification time
+				// If mtime is exactly the same, file is unchanged
 				if info.ModTime().Equal(dbFile.ModifiedAt) {
 					resultChan <- fileCheckResult{absPath: absPath, status: "unchanged"}
 					continue
 				}
 
-				// Mtime changed - verify content hash to be sure
+				// Mtime changed but size is same.
+				// On network/UNC paths, SHA256 requires downloading the full file over the
+				// network — skip it and conservatively treat as updated.
+				// On local paths, verify via content hash to avoid re-indexing touch'd files.
+				if skipHash {
+					resultChan <- fileCheckResult{absPath: absPath, status: "updated"}
+					continue
+				}
+
 				currentHash, err := extraction.ComputeSHA256(absPath)
 				if err != nil {
 					log.Printf("⚠️  Failed to compute hash for %s: %v", filepath.Base(absPath), err)
@@ -192,6 +211,10 @@ func DetectChanges(projectDB *db.ProjectDB, folderPath string) (*ChangeSet, erro
 			changes.ToDelete = append(changes.ToDelete, path)
 		}
 	}
+
+	sort.Strings(changes.ToAdd)
+	sort.Strings(changes.ToUpdate)
+	sort.Strings(changes.ToDelete)
 
 	elapsed := time.Since(startTime)
 	log.Printf("📊 DetectChanges Results: ToAdd=%d, ToUpdate=%d, ToDelete=%d (took %v)",

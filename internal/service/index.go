@@ -15,6 +15,14 @@ import (
 	"github.com/karim-daw/qwelli/internal/engine/differ"
 )
 
+const statusCacheTTL = 60 * time.Second
+
+// statusCacheEntry holds a cached GetIndexStatus result.
+type statusCacheEntry struct {
+	status   *differ.IndexStatus
+	cachedAt time.Time
+}
+
 // IndexInfo represents metadata about an indexed folder.
 type IndexInfo struct {
 	FolderPath    string
@@ -87,6 +95,8 @@ func (s *Service) indexFolder(ctx context.Context, folderPath string, incrementa
 	// Refresh column statistics so the query planner makes optimal choices
 	// on subsequent searches. Runs in <1s on typical indexes.
 	_ = projectDB.AnalyzeStats()
+	// Bust the status cache so the next GetIndexStatus call reflects the fresh index.
+	s.invalidateStatusCache(absPath)
 	return nil
 }
 
@@ -129,6 +139,8 @@ func (s *Service) Search(folderPath, query string, topK int, contentType, strate
 
 // SearchByDBPath performs a search using a direct DB path (used by server).
 func (s *Service) SearchByDBPath(dbPath, query string, topK int, contentType, strategy string) ([]engine.SearchResult, error) {
+	release := s.lockDB(dbPath)
+	defer release()
 	dim, err := db.GetDimensionFromDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -142,21 +154,96 @@ func (s *Service) SearchByDBPath(dbPath, query string, topK int, contentType, st
 }
 
 // GetIndexStatus returns pending changes for an indexed folder.
+// Results are cached for statusCacheTTL to avoid repeated expensive filesystem scans.
 func (s *Service) GetIndexStatus(folderPath string) (*differ.IndexStatus, error) {
 	absPath, err := filepath.Abs(folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
-	projectDB, err := s.OpenDB(absPath)
+
+	s.statusCacheMu.RLock()
+	entry, ok := s.statusCache[absPath]
+	s.statusCacheMu.RUnlock()
+	if ok && time.Since(entry.cachedAt) < statusCacheTTL {
+		return entry.status, nil
+	}
+
+	dbPath, err := s.GenerateDBPath(absPath)
 	if err != nil {
 		return nil, err
 	}
+	release := s.lockDB(dbPath)
+	projectDB, err := s.OpenDB(absPath)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	defer release()
 	defer projectDB.Close()
-	return s.engine.GetIndexStatus(projectDB, absPath)
+
+	status, err := s.engine.GetIndexStatus(projectDB, absPath)
+	if err != nil {
+		return nil, err
+	}
+
+	s.statusCacheMu.Lock()
+	s.statusCache[absPath] = statusCacheEntry{status: status, cachedAt: time.Now()}
+	s.statusCacheMu.Unlock()
+
+	return status, nil
+}
+
+// invalidateStatusCache clears the cached status for a folder so the next call rescans.
+func (s *Service) invalidateStatusCache(absPath string) {
+	s.statusCacheMu.Lock()
+	delete(s.statusCache, absPath)
+	s.statusCacheMu.Unlock()
+}
+
+// lockDB acquires a per-dbPath mutex and returns a release function.
+// DuckDB allows only one open connection to a file at a time, so callers
+// must hold this lock for the duration of open → use → close.
+func (s *Service) lockDB(dbPath string) func() {
+	s.dbMuMu.Lock()
+	mu, ok := s.dbMu[dbPath]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.dbMu[dbPath] = mu
+	}
+	s.dbMuMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
+// OpenDBLocked opens the project database and returns it along with a release function.
+// The caller must call release() after Close() to allow other goroutines to open the same DB.
+func (s *Service) OpenDBLocked(folderPath string) (*db.ProjectDB, func(), error) {
+	dbPath, err := s.GenerateDBPath(folderPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	release := s.lockDB(dbPath)
+	dim, err := db.GetDimensionFromDB(dbPath)
+	if err != nil {
+		release()
+		return nil, nil, fmt.Errorf("index not found for %s", folderPath)
+	}
+	pdb, err := db.OpenProjectDB(dbPath, dim)
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return pdb, release, nil
 }
 
 // GetIndexStats returns the number of indexed chunks for a folder.
 func (s *Service) GetIndexStats(folderPath string) (int, error) {
+	dbPath, err := s.GenerateDBPath(folderPath)
+	if err != nil {
+		return 0, err
+	}
+	release := s.lockDB(dbPath)
+	defer release()
 	projectDB, err := s.OpenDB(folderPath)
 	if err != nil {
 		return 0, err

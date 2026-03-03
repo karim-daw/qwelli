@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/karim-daw/qwelli/internal/config"
 	"github.com/karim-daw/qwelli/internal/db"
@@ -14,9 +15,13 @@ import (
 // Service is the single entry point for all business operations.
 // It owns the DB lifecycle — callers never open databases directly.
 type Service struct {
-	config       *config.Config
-	voyageClient voyage.ClientInterface
-	engine       *engine.Engine
+	config        *config.Config
+	voyageClient  voyage.ClientInterface
+	engine        *engine.Engine
+	statusCacheMu sync.RWMutex
+	statusCache   map[string]statusCacheEntry
+	dbMuMu        sync.Mutex
+	dbMu          map[string]*sync.Mutex // per-dbPath mutex — DuckDB allows only one connection at a time
 }
 
 // New creates a Service with an injected Voyage client.
@@ -45,6 +50,8 @@ func New(cfg *config.Config, client voyage.ClientInterface) *Service {
 		config:       cfg,
 		voyageClient: client,
 		engine:       eng,
+		statusCache:  make(map[string]statusCacheEntry),
+		dbMu:         make(map[string]*sync.Mutex),
 	}
 }
 
