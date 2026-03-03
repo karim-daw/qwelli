@@ -23,7 +23,7 @@ func NewServeCmd() *cobra.Command {
 		Long:  "Start the web interface for Qwelli on localhost",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			portExplicit := cmd.Flags().Changed("port")
-			return runServe(port, false, portExplicit)
+			return runServe(port, nil, portExplicit)
 		},
 	}
 
@@ -32,12 +32,21 @@ func NewServeCmd() *cobra.Command {
 	return cmd
 }
 
-// RunServeDefault runs serve with default settings and auto-opens browser
+// RunServeDefault runs serve with default settings and auto-opens browser.
 func RunServeDefault() error {
-	return runServe(0, true, false)
+	return runServe(0, openBrowserURL, false)
 }
 
-func runServe(port int, openBrowser bool, portExplicit bool) error {
+// RunServeDesktop runs serve and calls onReady with the server URL when ready.
+// Intended for desktop mode: the caller opens a native window to that URL.
+func RunServeDesktop(onReady func(string)) error {
+	return runServe(0, onReady, false)
+}
+
+// runServe starts the HTTP server. If onReady is non-nil the server is started
+// in a goroutine and onReady is called with the URL once it is listening;
+// otherwise the server runs synchronously (headless).
+func runServe(port int, onReady func(url string), portExplicit bool) error {
 	for {
 		if !config.Exists() {
 			// First-run: start setup server
@@ -48,12 +57,12 @@ func runServe(port int, openBrowser bool, portExplicit bool) error {
 			}
 			log.Printf("Starting on port %d", actualPort)
 
-			if openBrowser {
+			if onReady != nil {
 				serverErr := make(chan error, 1)
 				go func() {
 					serverErr <- ss.Start()
 				}()
-				openBrowserURL(fmt.Sprintf("http://localhost:%d", actualPort))
+				onReady(fmt.Sprintf("http://localhost:%d", actualPort))
 				if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 					return err
 				}
@@ -79,12 +88,12 @@ func runServe(port int, openBrowser bool, portExplicit bool) error {
 		}
 		log.Printf("Starting on port %d", actualPort)
 
-		if openBrowser {
+		if onReady != nil {
 			serverErr := make(chan error, 1)
 			go func() {
 				serverErr <- srv.Start()
 			}()
-			openBrowserURL(fmt.Sprintf("http://localhost:%d", actualPort))
+			onReady(fmt.Sprintf("http://localhost:%d", actualPort))
 			return <-serverErr
 		}
 

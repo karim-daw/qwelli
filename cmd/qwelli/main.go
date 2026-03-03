@@ -11,9 +11,10 @@ import (
 var version = "0.1.0"
 
 func main() {
-	// Double-click / no-args: default to serve
+	// Double-click / no-args: open the UI (browser in server builds, native
+	// window in desktop builds — see run_default.go and desktop.go).
 	if len(os.Args) == 1 {
-		if err := cli.RunServeDefault(); err != nil {
+		if err := runDefault(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

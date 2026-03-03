@@ -8,9 +8,13 @@ echo ""
 
 # Parse arguments
 RELEASE=0
+DESKTOP=0
 for arg in "$@"; do
     if [ "$arg" = "--release" ]; then
         RELEASE=1
+    fi
+    if [ "$arg" = "--desktop" ]; then
+        DESKTOP=1
     fi
 done
 
@@ -34,6 +38,14 @@ if ! command -v node &>/dev/null; then
     exit 1
 fi
 echo "  + Node.js found"
+
+if [ "$DESKTOP" = "1" ]; then
+    if ! go list github.com/wailsapp/wails/v2 &>/dev/null; then
+        echo "  Installing Wails dependency..."
+        go get github.com/wailsapp/wails/v2
+    fi
+    echo "  + Wails found"
+fi
 echo ""
 
 # ============================================
@@ -73,20 +85,32 @@ echo "[4/4] Building Go binary..."
 
 mkdir -p build
 
-if [ "$RELEASE" = "1" ]; then
-    echo "  Mode: release"
-    go build -ldflags "-s -w" -o build/qwelli ./cmd/qwelli
+if [ "$DESKTOP" = "1" ]; then
+    OUTPUT="build/qwelli-desktop"
+    TAGS="-tags desktop,production"
 else
-    echo "  Mode: dev"
-    go build -o build/qwelli ./cmd/qwelli
+    OUTPUT="build/qwelli"
+    TAGS=""
 fi
 
-echo "  + build/qwelli"
+if [ "$RELEASE" = "1" ]; then
+    echo "  Mode: release"
+    go build $TAGS -ldflags "-s -w" -o "$OUTPUT" ./cmd/qwelli
+else
+    echo "  Mode: dev"
+    go build $TAGS -o "$OUTPUT" ./cmd/qwelli
+fi
+
+echo "  + $OUTPUT"
 echo ""
 
 echo "============================================"
 echo "  Build Complete!"
 echo "============================================"
 echo ""
-echo "  Run: ./build/qwelli serve"
+if [ "$DESKTOP" = "1" ]; then
+    echo "  Run: ./$OUTPUT"
+else
+    echo "  Run: ./build/qwelli serve"
+fi
 echo ""
