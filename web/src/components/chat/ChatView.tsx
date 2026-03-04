@@ -3,6 +3,10 @@ import { MessageSquare, Trash2, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppContext } from "@/contexts/AppContext";
 import { useChat } from "@/hooks/useChat";
+import { usePDFPreview } from "@/hooks/usePDFPreview";
+import { PDFPreviewModal } from "@/components/modals/PDFPreviewModal";
+import { FullTextModal } from "@/components/modals/FullTextModal";
+import type { SearchResult } from "@/types/search";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 
@@ -15,6 +19,9 @@ export function ChatView() {
     const [isNearBottom, setIsNearBottom] = useState(true);
     const [showScrollBtn, setShowScrollBtn] = useState(false);
     const rafRef = useRef<number | null>(null);
+
+    const pdfPreview = usePDFPreview();
+    const [fullTextResult, setFullTextResult] = useState<SearchResult | null>(null);
 
     // Track scroll position, throttled to one update per animation frame
     const handleScroll = useCallback(() => {
@@ -69,7 +76,12 @@ export function ChatView() {
                     )}
 
                     {messages.map((m) => (
-                        <ChatMessage key={m.id} message={m} />
+                        <ChatMessage
+                            key={m.id}
+                            message={m}
+                            onOpenPDF={pdfPreview.open}
+                            onViewFullText={setFullTextResult}
+                        />
                     ))}
 
                     {messages.length > 0 && !isStreaming && (
@@ -116,6 +128,22 @@ export function ChatView() {
                     />
                 </div>
             </div>
+
+            {pdfPreview.isOpen && pdfPreview.data && (
+                <PDFPreviewModal
+                    filePath={pdfPreview.data.filePath}
+                    fileName={pdfPreview.data.fileName}
+                    initialPage={pdfPreview.data.initialPage}
+                    onClose={pdfPreview.close}
+                />
+            )}
+            {fullTextResult && (
+                <FullTextModal
+                    result={fullTextResult}
+                    open={true}
+                    onClose={() => setFullTextResult(null)}
+                />
+            )}
         </div>
     );
 }

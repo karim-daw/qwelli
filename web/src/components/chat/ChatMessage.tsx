@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Brain, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
+import type { SearchResult } from "@/types/search";
 import { ToolCallBlock } from "./ToolCallBlock";
 
 function ThinkingBlock({
@@ -66,7 +67,15 @@ function MarkdownBlock({ content }: { content: string }) {
     );
 }
 
-export function ChatMessage({ message }: { message: ChatMessageType }) {
+export function ChatMessage({
+    message,
+    onOpenPDF,
+    onViewFullText,
+}: {
+    message: ChatMessageType;
+    onOpenPDF: (result: SearchResult) => void;
+    onViewFullText: (result: SearchResult) => void;
+}) {
     if (message.role === "user") {
         return (
             <div className="rounded-xl bg-muted/70 dark:bg-muted/50 px-4 py-3 border border-border/50">
@@ -129,6 +138,8 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
                             <ToolCallBlock
                                 key={`${tc.name}-${j}`}
                                 toolCall={tc}
+                                onOpenPDF={onOpenPDF}
+                                onViewFullText={onViewFullText}
                             />
                         ))}
                     </Fragment>

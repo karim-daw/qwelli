@@ -9,9 +9,15 @@ import {
     Info,
     Files,
     ChevronRight,
+    ExternalLink,
+    Folder,
     type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import type { ToolCall } from "@/types/chat";
+import type { SearchResult } from "@/types/search";
+import { ResultCard } from "@/components/search/ResultCard";
+import * as filesApi from "@/api/files";
 
 interface ToolMeta {
     icon: LucideIcon;
@@ -87,6 +93,67 @@ const DEFAULT_META: ToolMeta = {
     dotColor: "bg-muted-foreground",
     label: "",
 };
+
+interface ToolSearchItem {
+    file_path: string;
+    file_name: string;
+    distance: number;
+    preview: string;
+    page_numbers?: number[];
+}
+
+interface FindFilesItem {
+    path: string;
+    file_name: string;
+    file_type: string;
+    size_bytes: number;
+    modified_at: string;
+}
+
+interface StatusData {
+    total: number;
+    needs_update?: boolean;
+    added?: string[];
+    modified?: string[];
+    deleted?: string[];
+}
+
+interface ListDirItem {
+    name: string;
+    is_dir: boolean;
+    size?: number;
+    modified?: string;
+}
+
+interface FileChunk {
+    content: string;
+    page?: number;
+}
+
+interface GetFileChunksData {
+    file_name: string;
+    chunks: FileChunk[];
+}
+
+interface GetFileInfoData {
+    file_name: string;
+    file_type: string;
+    chunk_count: number;
+    size_bytes: number;
+    modified_at?: string;
+}
+
+function toolSearchItemToResult(item: ToolSearchItem, index: number): SearchResult {
+    return {
+        chunkId: `${item.file_path}-${index}`,
+        filePath: item.file_path,
+        fileName: item.file_name,
+        content: item.preview,
+        contentType: "text",
+        similarity: Math.max(0, 1 - item.distance),
+        pageNumbers: item.page_numbers,
+    };
+}
 
 function formatArgs(input: Record<string, unknown>): string {
     const parts: string[] = [];
@@ -182,7 +249,27 @@ function formatResultFull(result: string): string {
     }
 }
 
-export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+    try {
+        return new Date(iso).toLocaleDateString();
+    } catch {
+        return iso;
+    }
+}
+
+interface ToolCallBlockProps {
+    toolCall: ToolCall;
+    onOpenPDF: (result: SearchResult) => void;
+    onViewFullText: (result: SearchResult) => void;
+}
+
+export function ToolCallBlock({ toolCall, onOpenPDF, onViewFullText }: ToolCallBlockProps) {
     const [expanded, setExpanded] = useState(false);
     const meta = TOOL_META[toolCall.name] || {
         ...DEFAULT_META,
@@ -192,6 +279,65 @@ export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
     const args = formatArgs(toolCall.input);
     const hasResult = toolCall.result !== undefined;
     const canExpand = hasResult && !toolCall.isRunning;
+
+    // Parse result for rich rendering
+    let searchResults: SearchResult[] | null = null;
+    let findFilesItems: FindFilesItem[] | null = null;
+    let statusData: StatusData | null = null;
+    let listDirItems: ListDirItem[] | null = null;
+    let fileChunksData: GetFileChunksData | null = null;
+    let fileInfoData: GetFileInfoData | null = null;
+    let readFileContent: string | null = null;
+    let indexUpdateMessage: string | null = null;
+
+    if (hasResult && !toolCall.isError) {
+        try {
+            const data = JSON.parse(toolCall.result!);
+            if (toolCall.name === "search" && Array.isArray(data)) {
+                searchResults = (data as ToolSearchItem[]).map(toolSearchItemToResult);
+            } else if (
+                toolCall.name === "find_files" &&
+                typeof data === "object" &&
+                data !== null &&
+                Array.isArray(data.files)
+            ) {
+                findFilesItems = data.files as FindFilesItem[];
+            } else if (toolCall.name === "status" && typeof data === "object" && data !== null) {
+                statusData = data as StatusData;
+            } else if (toolCall.name === "list_dir" && Array.isArray(data)) {
+                listDirItems = data as ListDirItem[];
+            } else if (
+                toolCall.name === "get_file_chunks" &&
+                typeof data === "object" &&
+                data !== null
+            ) {
+                fileChunksData = data as GetFileChunksData;
+            } else if (
+                toolCall.name === "get_file_info" &&
+                typeof data === "object" &&
+                data !== null
+            ) {
+                fileInfoData = data as GetFileInfoData;
+            }
+        } catch {
+            // Not JSON - check for text-based tools
+            if (toolCall.name === "read_file") {
+                readFileContent = toolCall.result!;
+            } else if (toolCall.name === "index_update") {
+                indexUpdateMessage = toolCall.result!;
+            }
+        }
+    }
+
+    const useRichRender =
+        searchResults !== null ||
+        findFilesItems !== null ||
+        statusData !== null ||
+        listDirItems !== null ||
+        fileChunksData !== null ||
+        fileInfoData !== null ||
+        readFileContent !== null ||
+        indexUpdateMessage !== null;
 
     return (
         <div className="flex flex-col">
@@ -262,13 +408,229 @@ export function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
                 }}
             >
                 <div className="overflow-hidden">
-                    <div className="ml-12 border-t border-border/50 mt-1">
-                        <pre className="text-xs font-mono p-3 max-h-80 overflow-y-auto custom-scrollbar text-muted-foreground whitespace-pre-wrap break-words">
-                            {hasResult && formatResultFull(toolCall.result!)}
-                        </pre>
+                    {useRichRender ? (
+                        <div className="pt-2 max-h-96 overflow-y-auto custom-scrollbar">
+                            <div className="flex flex-col gap-2">
+                                {searchResults && searchResults.map((result, i) => (
+                                    <ResultCard
+                                        key={result.chunkId}
+                                        result={result}
+                                        index={i}
+                                        onViewFullText={onViewFullText}
+                                        onOpenPDF={onOpenPDF}
+                                    />
+                                ))}
+                                {findFilesItems && findFilesItems.map((item, i) => (
+                                    <FindFileRow key={`${item.path}-${i}`} item={item} />
+                                ))}
+                                {statusData && <StatusCard data={statusData} />}
+                                {listDirItems && <ListDirCard items={listDirItems} />}
+                                {fileChunksData && <FileChunksCard data={fileChunksData} />}
+                                {fileInfoData && <FileInfoCard data={fileInfoData} />}
+                                {readFileContent && <ReadFileCard content={readFileContent} />}
+                                {indexUpdateMessage && <IndexUpdateCard message={indexUpdateMessage} />}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="ml-12 border-t border-border/50 mt-1">
+                            <pre className="text-xs font-mono p-3 max-h-80 overflow-y-auto custom-scrollbar text-muted-foreground whitespace-pre-wrap break-words">
+                                {hasResult && formatResultFull(toolCall.result!)}
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function FindFileRow({ item }: { item: FindFilesItem }) {
+    const handleOpen = () => {
+        window.open(filesApi.getFileUrl(item.path), "_blank");
+    };
+
+    const handleShowInExplorer = async () => {
+        try {
+            await filesApi.openFileLocation(item.path);
+        } catch (error) {
+            toast.error("Failed to open file location: " + String(error));
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-3 px-3 py-2 rounded hover:bg-muted/50 text-sm">
+            <FileText className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+            <span className="font-mono text-xs text-foreground/80 flex-1 min-w-0 truncate">
+                {item.file_name}
+            </span>
+            <span className="text-xs text-muted-foreground px-1.5 py-0.5 rounded bg-muted flex-shrink-0">
+                {item.file_type}
+            </span>
+            {item.size_bytes > 0 && (
+                <span className="text-xs text-muted-foreground flex-shrink-0">
+                    {formatFileSize(item.size_bytes)}
+                </span>
+            )}
+            {item.modified_at && (
+                <span className="text-xs text-muted-foreground flex-shrink-0">
+                    {formatDate(item.modified_at)}
+                </span>
+            )}
+            <button
+                type="button"
+                onClick={handleOpen}
+                className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                title="Open file"
+            >
+                <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+            <button
+                type="button"
+                onClick={handleShowInExplorer}
+                className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                title="Show in explorer"
+            >
+                <Folder className="w-3.5 h-3.5" />
+            </button>
+        </div>
+    );
+}
+
+function StatusCard({ data }: { data: StatusData }) {
+    const hasChanges = (data.added?.length ?? 0) + (data.modified?.length ?? 0) + (data.deleted?.length ?? 0) > 0;
+
+    return (
+        <div className="rounded-lg border border-border bg-card p-4">
+            <div className="grid grid-cols-2 gap-4 mb-3">
+                <div>
+                    <div className="text-xs text-muted-foreground">Total Files</div>
+                    <div className="text-lg font-semibold">{data.total}</div>
+                </div>
+                <div>
+                    <div className="text-xs text-muted-foreground">Status</div>
+                    <div className={`text-lg font-semibold ${data.needs_update ? 'text-amber-500' : 'text-emerald-500'}`}>
+                        {data.needs_update ? 'Needs Update' : 'Up to date'}
                     </div>
                 </div>
             </div>
+            {hasChanges && (
+                <div className="space-y-2 text-xs">
+                    {data.added && data.added.length > 0 && (
+                        <div>
+                            <span className="text-emerald-500 font-medium">+{data.added.length} added</span>
+                        </div>
+                    )}
+                    {data.modified && data.modified.length > 0 && (
+                        <div>
+                            <span className="text-amber-500 font-medium">~{data.modified.length} modified</span>
+                        </div>
+                    )}
+                    {data.deleted && data.deleted.length > 0 && (
+                        <div>
+                            <span className="text-red-500 font-medium">-{data.deleted.length} deleted</span>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ListDirCard({ items }: { items: ListDirItem[] }) {
+    return (
+        <div className="space-y-1">
+            {items.map((item, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-muted/50 text-sm">
+                    {item.is_dir ? (
+                        <FolderOpen className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                    ) : (
+                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    )}
+                    <span className="font-mono text-xs flex-1 min-w-0 truncate">
+                        {item.name}
+                    </span>
+                    {!item.is_dir && item.size && (
+                        <span className="text-xs text-muted-foreground">
+                            {formatFileSize(item.size)}
+                        </span>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function FileChunksCard({ data }: { data: GetFileChunksData }) {
+    return (
+        <div className="rounded-lg border border-border bg-card">
+            <div className="px-4 py-2 border-b border-border">
+                <div className="text-sm font-medium">{data.file_name}</div>
+                <div className="text-xs text-muted-foreground">{data.chunks.length} chunks</div>
+            </div>
+            <div className="divide-y divide-border max-h-80 overflow-y-auto custom-scrollbar">
+                {data.chunks.map((chunk, i) => (
+                    <div key={i} className="p-3">
+                        {chunk.page !== undefined && (
+                            <div className="text-xs text-blue-500 mb-1">Page {chunk.page}</div>
+                        )}
+                        <div className="text-xs text-foreground/80 whitespace-pre-wrap break-words">
+                            {chunk.content.length > 300 ? chunk.content.slice(0, 300) + "..." : chunk.content}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function FileInfoCard({ data }: { data: GetFileInfoData }) {
+    return (
+        <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-sm font-medium mb-3">{data.file_name}</div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                    <div className="text-muted-foreground">Type</div>
+                    <div className="font-medium">{data.file_type}</div>
+                </div>
+                <div>
+                    <div className="text-muted-foreground">Chunks</div>
+                    <div className="font-medium">{data.chunk_count}</div>
+                </div>
+                <div>
+                    <div className="text-muted-foreground">Size</div>
+                    <div className="font-medium">{formatFileSize(data.size_bytes)}</div>
+                </div>
+                {data.modified_at && (
+                    <div>
+                        <div className="text-muted-foreground">Modified</div>
+                        <div className="font-medium">{formatDate(data.modified_at)}</div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function ReadFileCard({ content }: { content: string }) {
+    return (
+        <div className="rounded-lg border border-border bg-card">
+            <pre className="text-xs font-mono p-4 max-h-80 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words">
+                {content}
+            </pre>
+        </div>
+    );
+}
+
+function IndexUpdateCard({ message }: { message: string }) {
+    const isUpToDate = message.toLowerCase().includes("up to date");
+
+    return (
+        <div className={`rounded-lg border p-4 ${
+            isUpToDate
+                ? 'border-emerald-500/50 bg-emerald-500/10'
+                : 'border-blue-500/50 bg-blue-500/10'
+        }`}>
+            <div className="text-sm">{message}</div>
         </div>
     );
 }
