@@ -26,6 +26,13 @@ go build -o qwelli ./cmd/qwelli
 cd web && npm install && npm run build
 # Then copy web/dist/ to internal/server/web/dist/
 
+# Hot reload dev workflow (UI changes only)
+# Terminal 1: Start Go server
+./qwelli.exe serve --port 8080
+# Terminal 2: Start Vite dev server (proxies API calls to Go server)
+cd web && npm run dev
+# Access at http://localhost:5173 - UI changes hot reload instantly
+
 # Run all tests
 go test ./...
 
@@ -65,6 +72,8 @@ The React frontend (`web/`) is built to `web/dist/`, copied to `internal/server/
 
 Uses **shadcn/ui** (Radix primitives + Tailwind CSS), **sonner** for toasts, and **react-pdf** for PDF preview.
 
+**Hot reload dev setup:** Vite dev server (`npm run dev`) proxies `/api/*` calls to the Go backend. The proxy target defaults to `http://localhost:8080` but can be overridden via `QWELLI_PORT` env var (e.g., `QWELLI_PORT=8081 npm run dev`).
+
 ```
 web/src/
   api/          # Typed fetch wrapper (client.ts) + per-feature modules (search, indexes, chat)
@@ -89,7 +98,7 @@ web/src/
 - **Theme** uses Tailwind `dark:` variants and CSS variable classes (`bg-background`, `text-foreground`, `bg-muted`, etc.) instead of runtime `isDark` conditionals. The `.dark` class is toggled on `<html>` by `useTheme`.
 - **API client** (`client.ts`) — typed `get`/`post`/`rawPost` wrappers accept an optional `AbortSignal` for request cancellation.
 - **Search** — in-flight requests are cancelled via `AbortController` when a new search starts or the component unmounts. Recent searches strip large fields (`imageData`, `content`) to keep localStorage lightweight. Recent searches are stored in `SearchContext` (backed by localStorage, keyed by index path).
-- **Chat** — `ChatView` pins the input at the bottom with a gradient fade. Auto-scroll only triggers when the user is near the bottom; a floating scroll-to-bottom button appears when scrolled up. `ToolCallBlock` uses Lucide icons with colored icon pills and CSS grid animated expand/collapse. SSE stream readers use `try/finally` to release locks.
+- **Chat** — `ChatView` pins the input at the bottom with a gradient fade. Auto-scroll only triggers when the user is near the bottom; a floating scroll-to-bottom button appears when scrolled up. `ToolCallBlock` uses Lucide icons with colored icon pills and CSS grid animated expand/collapse. Tool results render as interactive cards instead of raw JSON: `search` results use `ResultCard` with PDF preview and full-text modal support; `find_files` shows a compact file list with open/explorer actions; `status`/`list_dir`/`get_file_chunks`/`get_file_info`/`read_file`/`index_update` each have purpose-built card components. All cards use `max-h-96` scrollable containers. SSE stream readers use `try/finally` to release locks.
 - **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support. EventSources are closed before re-creating and on unmount.
 - **Terminal** — all backend `log.Printf` calls flow to the terminal automatically via `BroadcastWriter` (set as `log.SetOutput` in `Start()`). `useTerminal` batches SSE messages into state every 100ms to cap React re-renders at ~10/s during heavy indexing. Logs are capped at 500 entries server-side and client-side.
 - **Modals** — `FullTextModal` and `NewIndexDialog` use shadcn `Dialog`. `PDFPreviewModal` uses a plain overlay (shadcn Dialog's base classes conflict with the full-height flex layout needed for the PDF viewer).
