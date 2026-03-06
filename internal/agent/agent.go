@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -93,35 +96,57 @@ func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(Ch
 	a.messages = append(a.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage)))
 
 	for {
-		stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-			Model:     a.model,
-			MaxTokens: 16000,
-			Messages:  a.messages,
-			Tools:     a.tools,
-			System:    a.system,
-			Thinking:  anthropic.ThinkingConfigParamOfEnabled(8000),
-		})
-
-		message := anthropic.Message{}
-		for stream.Next() {
-			event := stream.Current()
-			if err := message.Accumulate(event); err != nil {
-				emit(ChatEvent{Type: "error", Text: fmt.Sprintf("accumulate stream event: %v", err)})
-				return fmt.Errorf("accumulate stream event: %w", err)
-			}
-
-			switch ev := event.AsAny().(type) {
-			case anthropic.ContentBlockDeltaEvent:
-				if ev.Delta.Thinking != "" {
-					emit(ChatEvent{Type: "thinking", Text: ev.Delta.Thinking})
-				} else if ev.Delta.Text != "" {
-					emit(ChatEvent{Type: "text_delta", Text: ev.Delta.Text})
+		// Retry on overloaded errors with exponential backoff (2s, 4s, 8s).
+		// Overloaded errors arrive before any tokens stream, so retrying is
+		// clean: message is empty and nothing has been appended to history.
+		const maxOverloadRetries = 3
+		var message anthropic.Message
+		var streamErr error
+		for attempt := 0; attempt <= maxOverloadRetries; attempt++ {
+			if attempt > 0 {
+				delay := time.Duration(1<<uint(attempt)) * time.Second
+				log.Printf("API overloaded, retrying in %s (attempt %d/%d)", delay, attempt, maxOverloadRetries)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(delay):
 				}
 			}
+
+			stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+				Model:     a.model,
+				MaxTokens: 16000,
+				Messages:  a.messages,
+				Tools:     a.tools,
+				System:    a.system,
+				Thinking:  anthropic.ThinkingConfigParamOfEnabled(8000),
+			})
+
+			message = anthropic.Message{}
+			for stream.Next() {
+				event := stream.Current()
+				if err := message.Accumulate(event); err != nil {
+					emit(ChatEvent{Type: "error", Text: fmt.Sprintf("accumulate stream event: %v", err)})
+					return fmt.Errorf("accumulate stream event: %w", err)
+				}
+
+				switch ev := event.AsAny().(type) {
+				case anthropic.ContentBlockDeltaEvent:
+					if ev.Delta.Thinking != "" {
+						emit(ChatEvent{Type: "thinking", Text: ev.Delta.Thinking})
+					} else if ev.Delta.Text != "" {
+						emit(ChatEvent{Type: "text_delta", Text: ev.Delta.Text})
+					}
+				}
+			}
+			streamErr = stream.Err()
+			if streamErr == nil || !isOverloadedError(streamErr) {
+				break
+			}
 		}
-		if err := stream.Err(); err != nil {
-			emit(ChatEvent{Type: "error", Text: fmt.Sprintf("stream error: %v", err)})
-			return fmt.Errorf("stream error: %w", err)
+		if streamErr != nil {
+			emit(ChatEvent{Type: "error", Text: fmt.Sprintf("stream error: %v", streamErr)})
+			return fmt.Errorf("stream error: %w", streamErr)
 		}
 
 		// Append the assistant's full response to history
@@ -154,11 +179,21 @@ func (a *Agent) ChatStream(ctx context.Context, userMessage string, emit func(Ch
 			wg.Add(1)
 			go func(i int, p pendingTool) {
 				defer wg.Done()
+				// Skip if context was already cancelled before this goroutine ran
+				if ctx.Err() != nil {
+					execResults[i] = execResult{id: p.variant.ID, name: p.variant.Name, result: "cancelled", isErr: false}
+					return
+				}
 				result, isErr := executeTool(ctx, a.svc, a.index, a.dbPath, p.variant.Name, p.rawInput)
 				execResults[i] = execResult{id: p.variant.ID, name: p.variant.Name, result: result, isErr: isErr}
 			}(i, p)
 		}
 		wg.Wait()
+
+		// If cancelled while tools were running, stop — don't make another API call
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
 		// Build tool result blocks and emit tool_result events in order
 		var toolResults []anthropic.ContentBlockParamUnion
@@ -196,4 +231,9 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) error {
 // ClearHistory resets the conversation history.
 func (a *Agent) ClearHistory() {
 	a.messages = nil
+}
+
+// isOverloadedError reports whether an error is an Anthropic 529 overloaded response.
+func isOverloadedError(err error) bool {
+	return strings.Contains(err.Error(), "overloaded")
 }

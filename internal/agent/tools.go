@@ -146,23 +146,26 @@ func toolDefs() []anthropic.ToolUnionParam {
 // executeTool dispatches a tool call to the appropriate handler.
 // Returns the tool result string and whether it's an error.
 func executeTool(ctx context.Context, svc *service.Service, indexPath, dbPath, name string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	switch name {
 	case "search":
-		return execSearch(svc, dbPath, rawInput)
+		return execSearch(ctx, svc, dbPath, rawInput)
 	case "status":
-		return execStatus(svc, indexPath)
+		return execStatus(ctx, svc, indexPath)
 	case "read_file":
-		return execReadFile(indexPath, rawInput)
+		return execReadFile(ctx, indexPath, rawInput)
 	case "list_dir":
-		return execListDir(indexPath, rawInput)
+		return execListDir(ctx, indexPath, rawInput)
 	case "index_update":
 		return execIndexUpdate(ctx, svc, indexPath)
 	case "get_file_chunks":
-		return execGetFileChunks(svc, indexPath, rawInput)
+		return execGetFileChunks(ctx, svc, indexPath, rawInput)
 	case "get_file_info":
-		return execGetFileInfo(svc, indexPath, rawInput)
+		return execGetFileInfo(ctx, svc, indexPath, rawInput)
 	case "find_files":
-		return execFindFiles(svc, indexPath, rawInput)
+		return execFindFiles(ctx, svc, indexPath, rawInput)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -184,7 +187,10 @@ type searchResultJSON struct {
 	PageNumbers []int   `json:"page_numbers,omitempty"`
 }
 
-func execSearch(svc *service.Service, dbPath string, rawInput json.RawMessage) (string, bool) {
+func execSearch(ctx context.Context, svc *service.Service, dbPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in searchInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
@@ -233,7 +239,10 @@ func extractPageNumbers(r engine.SearchResult) []int {
 	return nil
 }
 
-func execStatus(svc *service.Service, indexPath string) (string, bool) {
+func execStatus(ctx context.Context, svc *service.Service, indexPath string) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	status, err := svc.GetIndexStatus(indexPath)
 	if err != nil {
 		return fmt.Sprintf("failed to get status: %v", err), true
@@ -292,7 +301,10 @@ type filePathInput struct {
 	Path string `json:"path"`
 }
 
-func execReadFile(indexPath string, rawInput json.RawMessage) (string, bool) {
+func execReadFile(ctx context.Context, indexPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in filePathInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
@@ -344,7 +356,10 @@ func execReadFile(indexPath string, rawInput json.RawMessage) (string, bool) {
 	return content, false
 }
 
-func execListDir(indexPath string, rawInput json.RawMessage) (string, bool) {
+func execListDir(ctx context.Context, indexPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in filePathInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
@@ -410,7 +425,10 @@ func execIndexUpdate(ctx context.Context, svc *service.Service, indexPath string
 	return fmt.Sprintf("index updated successfully — processed %d files", processed), false
 }
 
-func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+func execGetFileChunks(ctx context.Context, svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in filePathInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
@@ -445,6 +463,14 @@ func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.Raw
 		return fmt.Sprintf("failed to get chunks: %v", err), true
 	}
 
+	if len(chunks) == 0 {
+		return fmt.Sprintf("no chunks found for %s (file_type: %s). "+
+			"The file is registered in the index but has no content chunks — "+
+			"it was likely indexed without multimodal support. "+
+			"Re-index this folder with content type 'all' to extract content from scanned PDFs and images.",
+			filepath.Base(absPath), file.FileType), false
+	}
+
 	type chunkJSON struct {
 		ChunkIndex  int    `json:"chunk_index"`
 		TotalChunks int    `json:"total_chunks"`
@@ -468,7 +494,10 @@ func execGetFileChunks(svc *service.Service, indexPath string, rawInput json.Raw
 	return string(data), false
 }
 
-func execGetFileInfo(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+func execGetFileInfo(ctx context.Context, svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in filePathInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
@@ -540,7 +569,10 @@ type findFilesInput struct {
 	Limit         int    `json:"limit"`
 }
 
-func execFindFiles(svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+func execFindFiles(ctx context.Context, svc *service.Service, indexPath string, rawInput json.RawMessage) (string, bool) {
+	if ctx.Err() != nil {
+		return "cancelled", false
+	}
 	var in findFilesInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true
