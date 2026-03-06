@@ -76,13 +76,14 @@ Uses **shadcn/ui** (Radix primitives + Tailwind CSS), **sonner** for toasts, and
 
 ```
 web/src/
-  api/          # Typed fetch wrapper (client.ts) + per-feature modules (search, indexes, chat)
+  api/          # Typed fetch wrapper (client.ts) + per-feature modules (search, indexes, chat, browse)
   types/        # TypeScript interfaces mirroring server/types.go + chat event/message types
   contexts/     # AppContext (indexes, viewMode) + AppMetaContext (needsSetup, quitConfirmed) + SearchContext (query, results, recent searches)
   hooks/        # useTheme, useSSE, useResizable, useSearch, useIndexProgress, useChat, etc.
   components/
     ui/         # shadcn/ui generated components (Button, Dialog, Card, etc.)
-    layout/     # AppLayout, Sidebar, TopBar, MainContent
+    layout/     # AppLayout, TopBar, MainContent
+    explorer/   # FileTree, FileTreeNode, FileTreeContext (sidebar file browser)
     search/     # SearchForm, SearchResults, ResultCard, RecentSearches
     status/     # StatusView, StatusSummaryGrid, FileChangeList
     modals/     # NewIndexDialog, IndexProgressModal, FullTextModal, PDFPreviewModal
@@ -101,6 +102,7 @@ web/src/
 - **Chat** — `ChatView` pins the input at the bottom with a gradient fade. Auto-scroll only triggers when the user is near the bottom; a floating scroll-to-bottom button appears when scrolled up. `ToolCallBlock` uses Lucide icons with colored icon pills and CSS grid animated expand/collapse. Tool results render as interactive cards instead of raw JSON: `search` results use `ResultCard` with PDF preview and full-text modal support; `find_files` shows a compact file list with open/explorer actions; `status`/`list_dir`/`get_file_chunks`/`get_file_info`/`read_file`/`index_update` each have purpose-built card components. All cards use `max-h-96` scrollable containers. SSE stream readers use `try/finally` to release locks.
 - **SSE** — `useSSE` hook for terminal streaming; `useIndexProgress` manages its own EventSource for index/update progress with cancel support. EventSources are closed before re-creating and on unmount.
 - **Terminal** — all backend `log.Printf` calls flow to the terminal automatically via `BroadcastWriter` (set as `log.SetOutput` in `Start()`). `useTerminal` batches SSE messages into state every 100ms to cap React re-renders at ~10/s during heavy indexing. Logs are capped at 500 entries server-side and client-side.
+- **File Explorer** — `FileTree` (`components/explorer/`) replaces the old `Sidebar` as the left panel. It uses `useFileTree` hook for lazy-loaded directory browsing via `GET /api/browse?path=...`. Root path and expanded nodes are persisted in localStorage. `FileTreeContext` provides tree state to recursive `FileTreeNode` components. Indexed folders show a green dot; non-indexed folders show a hover "index" action (`DatabaseZap` icon). The "Indexed" collapsible strip lists all indexes with quick-access to search, status, open-in-explorer, and delete. Client-side filter narrows visible entries by name.
 - **Modals** — `FullTextModal` and `NewIndexDialog` use shadcn `Dialog`. `PDFPreviewModal` uses a plain overlay (shadcn Dialog's base classes conflict with the full-height flex layout needed for the PDF viewer).
 
 ### Server Patterns
@@ -110,6 +112,7 @@ web/src/
 - **Log broadcasting** (`log_broadcast.go`): `BroadcastWriter` is set as `log.SetOutput` in `Server.Start()`. Every `log.Printf` anywhere in the codebase — engine, pipeline, voyage, differ, etc. — automatically appears in the terminal panel. Do not call `BroadcastTerminalOutput` directly for regular log messages; use `log.Printf` instead. `BroadcastTerminalOutput` is reserved for structured progress/phase events from `progressCb`/`phaseCb`.
 - SSE (Server-Sent Events) for real-time indexing progress (`/api/index/progress`) and terminal output (`/api/terminal/stream`).
 - Search results cached in-memory with 5-minute TTL.
+- **`GET /api/browse`** (`handler_browse.go`): filesystem directory listing for the explorer sidebar. Filters out hidden/system directories (`skipDirNames` map). Returns dirs-first, then files, capped at 500 entries. Indexed-folder detection uses a 10-second in-memory cache of indexed paths to avoid calling `ListIndexes` per request. Handles both local and UNC paths.
 - **`GetIndexStatus` cached** with 60-second TTL per index path (`Service.statusCache`). Cache is busted after `indexFolder()` completes. This prevents expensive repeated filesystem scans when the status view and agent `status` tool both fire in quick succession.
 - Background indexing with cancellation support via context.
 - Setup server (`setup_server.go`) runs on first launch when no config exists, then restarts as the main server.
@@ -132,7 +135,7 @@ User ↔ CLI (chat.go) ↔ Agent Loop (internal/agent/) ↔ Azure AI Foundry
                       Service  Filesystem  DB
 ```
 
-- **Agent loop** (`internal/agent/agent.go`) — streaming tool-use loop using `anthropic-sdk-go`. Calls `Messages.NewStreaming()`, accumulates events, dispatches tool calls in parallel (goroutines + `sync.WaitGroup`), sends results back, repeats until text-only response. Each `tool_call` and `tool_result` `ChatEvent` carries `ToolCallID` (the Anthropic tool_use block ID) so the frontend can match results to the right call regardless of arrival order.
+- **Agent loop** (`internal/agent/agent.go`) — streaming tool-use loop using `anthropic-sdk-go`. Calls `Messages.NewStreaming()`, accumulates events, dispatches tool calls in parallel (goroutines + `sync.WaitGroup`), sends results back, repeats until text-only response. Each `tool_call` and `tool_result` `ChatEvent` carries `ToolCallID` (the Anthropic tool_use block ID) so the frontend can match results to the right call regardless of arrival order. Overloaded (529) errors are retried with exponential backoff (2s, 4s, 8s) before any tokens stream. All tool functions accept `context.Context` and check `ctx.Err()` early to short-circuit cancelled tool executions.
 - **Tools** (`internal/agent/tools.go`) — 8 tools that map to existing service/DB/filesystem operations:
   - `search` — semantic/keyword/hybrid search via `svc.SearchByDBPath()`
   - `status` — index status via `svc.GetIndexStatus()`
@@ -221,3 +224,4 @@ Environment variables override `~/.qwelli/config.yaml` values.
 - Agent `find_files` tool must delegate to `projectDB.FindFiles(db.FindFilesFilter{...})` — do not call `GetAllFiles()` and filter in Go.
 - Agent tool DB access must use `svc.OpenDBLocked()` not `svc.OpenDB()` — parallel tool execution will otherwise hit DuckDB's single-connection limit and fail with "different configuration" errors.
 - `ChatEvent.ToolCallID` must be set on both `tool_call` and `tool_result` events — the frontend uses it to match results to the correct tool call block when tools run in parallel.
+- Agent tool functions must accept `context.Context` as first parameter and check `ctx.Err()` early — parallel tool goroutines must short-circuit cleanly on cancellation instead of doing wasted work.
