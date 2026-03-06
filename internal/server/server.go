@@ -96,6 +96,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/terminal/stream", s.handleTerminalStream)
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/chat/clear", s.handleChatClear)
+	mux.HandleFunc("/api/browse", s.handleBrowse)
 	mux.HandleFunc("/api/shutdown", s.handleShutdown)
 	mux.HandleFunc("/api/setup/status", handleSetupStatus)
 

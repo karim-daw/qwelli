@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Sidebar } from "./Sidebar";
+import { FileTree } from "@/components/explorer/FileTree";
 import { TopBar } from "./TopBar";
 import { MainContent } from "./MainContent";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -75,10 +75,10 @@ export function AppLayout() {
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
             {showSidebar && (
-                <Sidebar
+                <FileTree
                     width={sidebar.size}
                     onResizeStart={sidebar.onMouseDown}
-                    onShowNewIndexDialog={() => setShowNewIndexDialog(true)}
+                    onCreateIndex={handleCreateIndex}
                 />
             )}
 

@@ -565,10 +565,10 @@ function FileChunksCard({ data }: { data: GetFileChunksData }) {
         <div className="rounded-lg border border-border bg-card">
             <div className="px-4 py-2 border-b border-border">
                 <div className="text-sm font-medium">{data.file_name}</div>
-                <div className="text-xs text-muted-foreground">{data.chunks.length} chunks</div>
+                <div className="text-xs text-muted-foreground">{data.chunks?.length ?? 0} chunks</div>
             </div>
             <div className="divide-y divide-border max-h-80 overflow-y-auto custom-scrollbar">
-                {data.chunks.map((chunk, i) => (
+                {(data.chunks ?? []).map((chunk, i) => (
                     <div key={i} className="p-3">
                         {chunk.page !== undefined && (
                             <div className="text-xs text-blue-500 mb-1">Page {chunk.page}</div>

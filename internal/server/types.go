@@ -2,6 +2,24 @@ package server
 
 import "time"
 
+// BrowseEntry represents a single filesystem entry returned by GET /api/browse.
+type BrowseEntry struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	IsDir      bool   `json:"isDir"`
+	Size       int64  `json:"size,omitempty"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
+	IsIndexed  bool   `json:"isIndexed,omitempty"`
+}
+
+// BrowseResponse is the response body for GET /api/browse.
+type BrowseResponse struct {
+	Entries   []BrowseEntry `json:"entries"`
+	Parent    string        `json:"parent"`
+	Total     int           `json:"total"`
+	Truncated bool          `json:"truncated,omitempty"`
+}
+
 // IndexInfo represents an indexed folder in API responses.
 type IndexInfo struct {
 	Name          string `json:"name"`
