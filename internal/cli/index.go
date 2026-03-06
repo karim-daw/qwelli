@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+//
+
 func NewIndexCmd() *cobra.Command {
 	var incremental, multimodal bool
 
